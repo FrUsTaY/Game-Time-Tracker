@@ -1,3 +1,4 @@
+import os
 import sys
 from tkinter import messagebox
 
@@ -8,9 +9,21 @@ from ui.main_window import MainWindow
 from tray import SystemTray
 
 
+def get_app_dir():
+    """Возвращает абсолютный путь к директории, в которой находится исполняемый файл или скрипт."""
+    if getattr(sys, 'frozen', False):
+        # Если запущено как скомпилированный .exe (через PyInstaller)
+        return os.path.dirname(sys.executable)
+    else:
+        # Если запущено как обычный python скрипт
+        return os.path.dirname(os.path.abspath(__file__))
+
+
 class App:
     def __init__(self):
-        self.db = Database("data/gametracker.db")
+        # Используем абсолютный путь для БД, чтобы избежать проблем с автозагрузкой
+        db_path = os.path.join(get_app_dir(), "data", "gametracker.db")
+        self.db = Database(db_path)
         self.settings = AppSettings(self.db)
         # Настройки загружаются из БД, ничего не переопределяем
         self.tracker = None
