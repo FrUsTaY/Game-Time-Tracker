@@ -56,7 +56,7 @@ class AppSettings:
             # Путь к текущему исполняемому файлу (поддерживает .exe и .py)
             if getattr(sys, 'frozen', False):
                 # Запущено как .exe
-                app_path = sys.executable
+                app_path = f'"{sys.executable}"'
             else:
                 # Запущено как скрипт
                 app_path = f'"{sys.executable}" "{os.path.abspath("main.py")}"'
