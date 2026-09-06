@@ -7,7 +7,6 @@ from tkinter import filedialog, messagebox
 import os
 from datetime import datetime
 from typing import Dict, Optional, List
-import psutil
 import win32gui
 import win32process
 
