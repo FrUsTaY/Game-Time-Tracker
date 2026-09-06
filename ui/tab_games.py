@@ -10,7 +10,7 @@ import psutil
 import win32gui
 import win32process
 
-from ui.widgets import GameCard, NeonButton, SectionTitle
+from ui.widgets import GameCard, SectionTitle
 from database import Database
 from tracker import GameTracker
 from settings import AppSettings
