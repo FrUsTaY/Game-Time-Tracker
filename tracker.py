@@ -81,10 +81,15 @@ class GameTracker:
                 proc_info = proc.info
                 if proc_info['name']:
                     exe_name = proc_info['name'].lower()
-                    running_processes[exe_name] = {
-                        'pid': proc_info['pid'],
-                        'exe_path': proc_info['exe']
-                    }
+                    if exe_name not in running_processes:
+                        running_processes[exe_name] = {
+                            'pids': [],
+                            'exe_path': proc_info['exe']
+                        }
+                    running_processes[exe_name]['pids'].append(proc_info['pid'])
+                    # Обновляем exe_path, если он появился
+                    if proc_info['exe'] and not running_processes[exe_name]['exe_path']:
+                        running_processes[exe_name]['exe_path'] = proc_info['exe']
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
 
@@ -93,14 +98,9 @@ class GameTracker:
         for exe_name, game_info in games_by_exe.items():
             if exe_name not in running_processes:
                 continue
-            # Собираем все PID с таким именем
-            pids = []
-            for proc in psutil.process_iter(['pid', 'name']):
-                try:
-                    if proc.info['name'] and proc.info['name'].lower() == exe_name:
-                        pids.append(proc.info['pid'])
-                except:
-                    continue
+
+            pids = running_processes[exe_name]['pids']
+
             # Выбираем PID, у которого есть видимое окно
             selected_pid = None
             selected_exe_path = None
