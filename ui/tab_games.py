@@ -66,8 +66,6 @@ class AddFromProcessesDialog(ctk.CTkToplevel):
 
     def load_processes(self):
         processes = self.tracker.get_running_processes()
-        import win32gui
-        import win32process
         # Собираем заголовки окон для каждого PID
         self.all_processes = []
         for proc in processes:
