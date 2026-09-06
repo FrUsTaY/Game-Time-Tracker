@@ -5,6 +5,7 @@ tab_games.py — вкладка «Мои игры» для GameTimeTracker.
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import os
+from datetime import datetime
 from typing import Dict, Optional, List
 import psutil
 import win32gui
@@ -318,12 +319,17 @@ class TabGames(ctk.CTkFrame):
                 if is_active is None:
                     is_active = game_id in (self.tracker.active_sessions.keys() if self.tracker else {})
                 card.update_time(total_seconds, is_active)
-                # Обновляем дату последнего запуска при первой секунде после старта
-                if total_seconds == 1:
-                    game = self.db.get_game_by_id(game_id)
-                    if game and game.get('last_launched'):
-                        last = game['last_launched'][:10]
-                        card.date_label.configure(text=f"Последний запуск: {last}")
+                # Обновляем дату последнего запуска при первой секунде после старта сессии
+                if total_seconds == 1 or (is_active and not hasattr(card, '_session_launched_updated')):
+                    last = datetime.now().strftime('%Y-%m-%d')
+                    card.date_label.configure(text=f"Последний запуск: {last}")
+                    if is_active:
+                        card._session_launched_updated = True
+
+                # Сбрасываем флаг при окончании сессии
+                if not is_active and hasattr(card, '_session_launched_updated'):
+                    delattr(card, '_session_launched_updated')
+
                 self.scrollable_frame.update_idletasks()
                 self.update_idletasks()
                 if self.winfo_toplevel():
