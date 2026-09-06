@@ -20,8 +20,9 @@ class Database:
         Args:
             db_path: путь к файлу базы данных
         """
-        # Создаём директорию для БД, если её нет
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        # Создаём директорию для БД, если её нет (пропускаем для in-memory БД)
+        if db_path != ":memory:":
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
