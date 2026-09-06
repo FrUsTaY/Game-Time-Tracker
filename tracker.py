@@ -150,8 +150,8 @@ class GameTracker:
                     # Увеличиваем время текущей сессии (только локально)
                     session_info['current_seconds'] += 1
                     # НЕ обновляем БД каждую секунду, только при завершении сессии
-                    # Получаем ранее сохранённое общее время из БД (без учёта текущей сессии)
-                    game = self.db.get_game_by_id(game_id)
+                    # Получаем ранее сохранённое общее время из уже загруженных данных (без учёта текущей сессии)
+                    game = tracked_games.get(game_id, {}).get('game_info')
                     saved_seconds = game['total_seconds'] if game else 0
                     total_seconds = saved_seconds + session_info['current_seconds']
                     print(f"DEBUG: вызываем on_tick для game_id {game_id}, total_seconds={total_seconds} (сессия={session_info['current_seconds']}, сохранено={saved_seconds})")
