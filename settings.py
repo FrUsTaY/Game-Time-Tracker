@@ -6,7 +6,6 @@
 import winreg
 import sys
 import os
-from typing import Optional
 from database import Database
 
 
