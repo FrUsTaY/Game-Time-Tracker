@@ -204,7 +204,6 @@ class GameTracker:
         
         # Если не совпало, получаем все окна текущего процесса игры
         try:
-            import win32gui
             def enum_windows_callback(hwnd, hwnds):
                 if win32gui.IsWindowVisible(hwnd):
                     _, pid = win32process.GetWindowThreadProcessId(hwnd)
