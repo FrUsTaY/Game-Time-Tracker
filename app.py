@@ -1,5 +1,4 @@
 import sys
-from tkinter import messagebox
 
 from database import Database
 from settings import AppSettings
