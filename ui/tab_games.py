@@ -6,7 +6,6 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import os
 from typing import Dict, Optional, List
-import psutil
 import win32gui
 import win32process
 
