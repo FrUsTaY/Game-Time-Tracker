@@ -21,7 +21,9 @@ class Database:
             db_path: путь к файлу базы данных
         """
         # Создаём директорию для БД, если её нет
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        db_dir = os.path.dirname(db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
 
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
