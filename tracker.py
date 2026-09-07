@@ -7,7 +7,6 @@ tracker.py — модуль мониторинга игровых процесс
 import threading
 import time
 import os
-from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any
 
 import psutil
@@ -81,10 +80,15 @@ class GameTracker:
                 proc_info = proc.info
                 if proc_info['name']:
                     exe_name = proc_info['name'].lower()
-                    running_processes[exe_name] = {
-                        'pid': proc_info['pid'],
-                        'exe_path': proc_info['exe']
-                    }
+                    if exe_name not in running_processes:
+                        running_processes[exe_name] = {
+                            'pids': [],
+                            'exe_path': proc_info['exe']
+                        }
+                    running_processes[exe_name]['pids'].append(proc_info['pid'])
+                    # Обновляем exe_path, если он появился
+                    if proc_info['exe'] and not running_processes[exe_name]['exe_path']:
+                        running_processes[exe_name]['exe_path'] = proc_info['exe']
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
 
@@ -93,14 +97,9 @@ class GameTracker:
         for exe_name, game_info in games_by_exe.items():
             if exe_name not in running_processes:
                 continue
-            # Собираем все PID с таким именем
-            pids = []
-            for proc in psutil.process_iter(['pid', 'name']):
-                try:
-                    if proc.info['name'] and proc.info['name'].lower() == exe_name:
-                        pids.append(proc.info['pid'])
-                except:
-                    continue
+
+            pids = running_processes[exe_name]['pids']
+
             # Выбираем PID, у которого есть видимое окно
             selected_pid = None
             selected_exe_path = None
@@ -150,8 +149,8 @@ class GameTracker:
                     # Увеличиваем время текущей сессии (только локально)
                     session_info['current_seconds'] += 1
                     # НЕ обновляем БД каждую секунду, только при завершении сессии
-                    # Получаем ранее сохранённое общее время из БД (без учёта текущей сессии)
-                    game = self.db.get_game_by_id(game_id)
+                    # Получаем ранее сохранённое общее время из уже загруженных данных (без учёта текущей сессии)
+                    game = tracked_games.get(game_id, {}).get('game_info')
                     saved_seconds = game['total_seconds'] if game else 0
                     total_seconds = saved_seconds + session_info['current_seconds']
                     print(f"DEBUG: вызываем on_tick для game_id {game_id}, total_seconds={total_seconds} (сессия={session_info['current_seconds']}, сохранено={saved_seconds})")
@@ -204,7 +203,6 @@ class GameTracker:
         
         # Если не совпало, получаем все окна текущего процесса игры
         try:
-            import win32gui
             def enum_windows_callback(hwnd, hwnds):
                 if win32gui.IsWindowVisible(hwnd):
                     _, pid = win32process.GetWindowThreadProcessId(hwnd)

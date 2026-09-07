@@ -21,7 +21,9 @@ class Database:
             db_path: путь к файлу базы данных
         """
         # Создаём директорию для БД, если её нет
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        db_dir = os.path.dirname(db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
 
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -286,6 +288,15 @@ class Database:
 
     # ---------- Экспорт ----------
 
+    def _sanitize_csv_value(self, value: Any) -> Any:
+        """
+        Очищает значение от возможных CSV-инъекций.
+        Если строка начинается с =, +, -, или @, добавляет одинарную кавычку.
+        """
+        if isinstance(value, str) and value and value[0] in ('=', '+', '-', '@'):
+            return f"'{value}"
+        return value
+
     def export_sessions_csv(self, filepath: str) -> bool:
         """
         Экспортирует все сессии в CSV-файл.
@@ -311,9 +322,11 @@ class Database:
                 writer.writerow(['ID', 'Игра', 'Начало', 'Конец', 'Длительность (сек)'])
                 for row in rows:
                     writer.writerow([
-                        row['id'], row['game_name'],
-                        row['started_at'], row['ended_at'],
-                        row['duration_seconds']
+                        self._sanitize_csv_value(row['id']),
+                        self._sanitize_csv_value(row['game_name']),
+                        self._sanitize_csv_value(row['started_at']),
+                        self._sanitize_csv_value(row['ended_at']),
+                        self._sanitize_csv_value(row['duration_seconds'])
                     ])
             return True
         except Exception as e:
