@@ -20,6 +20,7 @@ class Database:
         Args:
             db_path: путь к файлу базы данных
         """
+        # Создаём директорию для БД, если её нет (для :memory: пути не будет)
         # Создаём директорию для БД, если её нет
         db_dir = os.path.dirname(db_path)
         if db_dir:
@@ -28,6 +29,8 @@ class Database:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        # Включаем поддержку внешних ключей (foreign keys) для SQLite
+        self.conn.execute("PRAGMA foreign_keys = ON")
         self._create_tables()
 
     def _create_tables(self) -> None:
