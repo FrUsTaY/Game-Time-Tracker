@@ -42,5 +42,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['C:/Users/admin/Desktop/Game-Time-Tracker/assets/app.ico'],
+    icon=['assets/app.ico'],
 )

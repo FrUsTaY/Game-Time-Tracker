@@ -49,16 +49,25 @@ class SystemTray:
 
     def _setup_menu(self):
         return pystray.Menu(
-            pystray.MenuItem("Открыть GameTimeTracker", self.on_open, default=True),
-            pystray.MenuItem("Настройки", self.on_settings),
+            pystray.MenuItem("Открыть GameTimeTracker", self._on_open, default=True),
+            pystray.MenuItem("Настройки", self._on_settings),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Выход", self._on_exit)
         )
 
-    def _on_exit(self, icon, item):
+    def _on_open(self, icon=None, item=None):
+        if self.on_open:
+            self.on_open()
+
+    def _on_settings(self, icon=None, item=None):
+        if self.on_settings:
+            self.on_settings()
+
+    def _on_exit(self, icon=None, item=None):
         """Обработчик выхода. Вызывается в потоке трея."""
         # Не вызываем self.stop() здесь, чтобы избежать self-join
-        self.on_exit()
+        if self.on_exit:
+            self.on_exit()
 
     def _run(self):
         self.icon = pystray.Icon("GameTimeTracker", self._image, "GameTimeTracker", self._setup_menu())
@@ -86,13 +95,13 @@ class SystemTray:
         if self.icon and self._running:
             try:
                 self.icon.notify(message, title)
-            except AttributeError:
-                try:
-                    from plyer import notification
-                    notification.notify(title=title, message=message, app_name="GameTimeTracker", timeout=5)
-                except ImportError:
-                    print(f"Уведомление: {title} - {message}")
-                except Exception as e:
-                    print(f"Ошибка показа уведомления: {e}")
-        else:
-            print(f"Уведомление (трей не активен): {title} - {message}")
+                return
+            except Exception:
+                pass
+        try:
+            from plyer import notification
+            notification.notify(title=title, message=message, app_name="GameTimeTracker", timeout=5)
+        except ImportError:
+            print(f"Уведомление: {title} - {message}")
+        except Exception as e:
+            print(f"Ошибка показа уведомления: {e}")

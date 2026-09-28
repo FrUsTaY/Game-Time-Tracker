@@ -125,6 +125,9 @@ class TabStats(ctk.CTkFrame):
         card.value_label = value_label
         return card
 
+    def refresh(self):
+        self.load_stats()
+
     def load_stats(self):
         self._update_summary_cards()
         self._update_top_games()

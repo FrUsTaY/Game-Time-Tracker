@@ -104,9 +104,28 @@ class TabArchive(ctk.CTkFrame):
         import os
         return os.path.exists(path)
 
+    def _get_main_window(self):
+        main_win = getattr(self, 'main_window', None)
+        if main_win:
+            return main_win
+        try:
+            top = self.winfo_toplevel()
+            if hasattr(top, 'refresh_tab') or hasattr(top, 'tabs_cache'):
+                return top
+        except Exception:
+            pass
+        return None
+
     def restore_game(self, game_id: int):
         self.db.unarchive_game(game_id)
         self.refresh()
-        # Обновляем вкладку "Мои игры", если она существует (через tabs_cache)
-        if hasattr(self.master_window, 'tabs_cache') and 'games' in self.master_window.tabs_cache:
-            self.master_window.tabs_cache['games'].refresh_games()
+        # Обновляем вкладку "Мои игры", если она существует
+        main_win = self._get_main_window()
+        if main_win and hasattr(main_win, 'refresh_tab'):
+            main_win.refresh_tab('games')
+        elif main_win and hasattr(main_win, 'tabs_cache') and 'games' in main_win.tabs_cache:
+            games_tab = main_win.tabs_cache['games']
+            if hasattr(games_tab, 'refresh_games'):
+                games_tab.refresh_games()
+            elif hasattr(games_tab, 'refresh'):
+                games_tab.refresh()

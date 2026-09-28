@@ -25,13 +25,17 @@ class GameTracker:
         self,
         db: Database,
         settings: AppSettings,
-        on_tick: Optional[Callable[[int, int], None]] = None
+        on_tick: Optional[Callable[[int, int, bool], None]] = None,
+        tray: Optional[Any] = None,
+        on_notification: Optional[Callable[[str, str], None]] = None
     ):
         self.db = db
         self.settings = settings
         self.on_tick = on_tick
+        self.tray = tray
+        self.on_notification = on_notification
 
-        # Активные сессии: {game_id: {'session_id': int, 'current_seconds': int, 'last_flushed_seconds': int, 'initial_total_seconds': int, 'process_pid': int, 'was_active': bool}}
+        # Активные сессии: {game_id: {'session_id': int, 'current_seconds': int, 'last_flushed_seconds': int, 'initial_total_seconds': int, 'process_pid': int, 'was_active': bool, 'long_session_notified': bool}}
         self.active_sessions: Dict[int, Dict[str, Any]] = {}
         self.flush_interval = 60  # Интервал периодического сброса прогресса в БД (секунды)
         self.lock = threading.Lock()
@@ -39,9 +43,36 @@ class GameTracker:
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
+        # Множества для отслеживания запущенных процессов (.exe) и предотвращения спама уведомлениями
+        self._seen_exes: set = set()
+        self._notified_new_exes: set = set()
+
+    def notify(self, title: str, message: str) -> None:
+        """Отправка системного уведомления через tray или колбэк"""
+        if self.on_notification:
+            try:
+                self.on_notification(title, message)
+            except Exception as e:
+                print(f"GameTracker: ошибка в on_notification: {e}")
+
+        if self.tray and hasattr(self.tray, 'show_notification'):
+            try:
+                self.tray.show_notification(title, message)
+            except Exception as e:
+                print(f"GameTracker: ошибка в tray.show_notification: {e}")
+
+        if not self.on_notification and not self.tray:
+            print(f"Уведомление: {title} - {message}")
+
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
+        # Фиксируем уже работающие процессы при старте, чтобы не спамить уведомлениями
+        if not self._seen_exes:
+            try:
+                self._seen_exes = {p['name'].lower() for p in self.get_running_processes() if p.get('name')}
+            except Exception:
+                pass
         self._running = True
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._thread.start()
@@ -60,19 +91,19 @@ class GameTracker:
 
     def _monitor_loop(self) -> None:
         while self._running:
+            loop_start = time.monotonic()
             try:
                 self._check_processes()
             except Exception as e:
                 print(f"Ошибка в цикле мониторинга: {e}")
-            time.sleep(1.0)
+            elapsed = time.monotonic() - loop_start
+            sleep_time = max(0.1, 1.0 - elapsed)
+            time.sleep(sleep_time)
 
     def _check_processes(self) -> None:
         # Получаем все активные игры из БД
         games = self.db.get_all_games(archived=False)
-        if not games:
-            return
-
-        games_by_exe = {game['exe_name'].lower(): game for game in games}
+        games_by_exe = {game['exe_name'].lower(): game for game in games} if games else {}
 
         # Получаем запущенные процессы
         running_processes = {}
@@ -92,6 +123,25 @@ class GameTracker:
                         running_processes[exe_name]['exe_path'] = proc_info['exe']
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
+
+        # Обнаружение новых запущенных процессов (.exe), которых ещё нет в библиотеке
+        new_running_exes = []
+        for exe_name in running_processes.keys():
+            if exe_name not in self._seen_exes:
+                self._seen_exes.add(exe_name)
+                new_running_exes.append(exe_name)
+
+        if self.settings.notify_new_game and new_running_exes:
+            try:
+                all_games = self.db.get_all_games(archived=False) + self.db.get_all_games(archived=True)
+                library_exes = {g['exe_name'].lower() for g in all_games}
+            except Exception:
+                library_exes = set(games_by_exe.keys())
+
+            for exe_name in new_running_exes:
+                if exe_name not in library_exes and exe_name not in self._notified_new_exes:
+                    self._notified_new_exes.add(exe_name)
+                    self.notify("GameTimeTracker", f"Обнаружена новая игра: {exe_name}")
 
         # Игры, которые сейчас запущены (выбираем процесс с окном, если есть)
         tracked_games = {}
@@ -128,11 +178,13 @@ class GameTracker:
                 tracked_games[game_info['id']] = {
                     'game_info': game_info,
                     'pid': selected_pid,
+                    'pids': pids,
                     'exe_path': running_processes[exe_name]['exe_path']
                 }
 
         # Получаем активное окно
         active_pid = self._get_active_window_pid()
+        now = time.monotonic()
 
         with self.lock:
             # 1. Обновляем существующие сессии
@@ -143,25 +195,61 @@ class GameTracker:
                     continue
 
                 # Игра всё ещё запущена
-                is_active = self._is_game_active(game_id, tracked_games[game_id]['pid'], active_pid)
-                # Отладка
-                print(f"DEBUG: game_id {game_id}, active_pid={active_pid}, game_pid={tracked_games[game_id]['pid']}, is_active={is_active}, track_only={self.settings.track_only_active_window}")
+                is_active = self._is_game_active(
+                    game_id,
+                    tracked_games[game_id]['pid'],
+                    active_pid,
+                    tracked_games[game_id].get('pids')
+                )
+
+                last_tick = session_info.get('last_tick_time', now)
+                delta = now - last_tick
+                session_info['last_tick_time'] = now
+
+                # Защита от аномалий (сон ПК или зависание)
+                if delta < 0:
+                    delta = 0.0
+                elif delta > 5.0:
+                    delta = 1.0
+
                 if is_active:
-                    # Увеличиваем время текущей сессии
-                    session_info['current_seconds'] += 1
+                    if not session_info.get('was_active', False):
+                        # Первый шаг активности после неактивности
+                        session_info['was_active'] = True
+                        delta = min(delta, 1.0)
+
+                    accumulated = session_info.get('accumulated_seconds', float(session_info['current_seconds']))
+                    accumulated += delta
+                    session_info['accumulated_seconds'] = accumulated
+                    session_info['current_seconds'] = int(accumulated)
+
+                    # Проверка напоминания о долгой сессии
+                    if self.settings.notify_long_session:
+                        limit_seconds = self.settings.long_session_minutes * 60
+                        if session_info['current_seconds'] >= limit_seconds and not session_info.get('long_session_notified', False):
+                            session_info['long_session_notified'] = True
+                            minutes = self.settings.long_session_minutes
+                            self.notify(
+                                "GameTimeTracker",
+                                f"Вы играете уже {minutes} минут! Пора сделать перерыв"
+                            )
+
                     initial_sec = session_info.setdefault('initial_total_seconds', 0)
                     total_seconds = initial_sec + session_info['current_seconds']
-                    print(f"DEBUG: вызываем on_tick для game_id {game_id}, total_seconds={total_seconds} (сессия={session_info['current_seconds']}, база={initial_sec})")
                     if self.on_tick:
                         self.on_tick(game_id, total_seconds, True)
-                    else:
-                        print("DEBUG: on_tick is None!")
 
                     # Периодический сброс прогресса в БД (раз в flush_interval секунд)
                     unflushed = session_info['current_seconds'] - session_info.get('last_flushed_seconds', 0)
                     if unflushed >= self.flush_interval:
                         self._flush_session(game_id, session_info)
-                # Если не активно, ничего не добавляем, но сессию не закрываем
+                else:
+                    was_active = session_info.get('was_active', False)
+                    session_info['was_active'] = False
+                    if was_active and self.on_tick:
+                        initial_sec = session_info.setdefault('initial_total_seconds', 0)
+                        total_seconds = initial_sec + session_info['current_seconds']
+                        self.on_tick(game_id, total_seconds, False)
 
             # 2. Создаём новые сессии для вновь запущенных игр
             for game_id, proc_info in tracked_games.items():
@@ -175,69 +263,64 @@ class GameTracker:
                     self.active_sessions[game_id] = {
                         'session_id': session_id,
                         'current_seconds': 0,
+                        'accumulated_seconds': 0.0,
+                        'last_tick_time': now,
                         'last_flushed_seconds': 0,
                         'initial_total_seconds': initial_sec,
                         'process_pid': proc_info['pid'],
-                        'was_active': False
+                        'was_active': False,
+                        'long_session_notified': False
                     }
                     print(f"GameTracker: создана сессия {session_id} для игры ID {game_id} (PID {proc_info['pid']})")
 
     def _get_active_window_pid(self) -> Optional[int]:
         try:
             hwnd = win32gui.GetForegroundWindow()
-            if hwnd == 0:
+            if not hwnd:
                 return None
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
-            title = win32gui.GetWindowText(hwnd)
-            print(f"DEBUG: активное окно: PID={pid}, заголовок='{title}'")
             return pid
-        except Exception as e:
-            print(f"DEBUG: ошибка получения активного окна: {e}")
+        except Exception:
             return None
 
-    def _is_game_active(self, game_id: int, game_pid: int, active_pid: Optional[int]) -> bool:
+    def _is_game_active(
+        self,
+        game_id: int,
+        game_pid: int,
+        active_pid: Optional[int],
+        game_pids: Optional[List[int]] = None
+    ) -> bool:
         track_only = self.settings.track_only_active_window
         if not track_only:
             return True
-        
+
         if active_pid is None:
             return False
-        
-        # Сначала пробуем прямое сравнение PID
+
+        # Прямое совпадение PID процесса игры
         if game_pid == active_pid:
             return True
-        
-        # Если не совпало, получаем все окна текущего процесса игры
+
+        if game_pids and active_pid in game_pids:
+            return True
+
+        # Проверяем, является ли active_pid дочерним процессом игры
         try:
-            def enum_windows_callback(hwnd, hwnds):
-                if win32gui.IsWindowVisible(hwnd):
-                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                    if pid == game_pid:
-                        hwnds.append(hwnd)
-                        # Отладочный вывод: заголовок окна
-                        title = win32gui.GetWindowText(hwnd)
-                        print(f"DEBUG: найдено окно процесса {game_pid}: '{title}'")
+            proc = psutil.Process(game_pid)
+            child_pids = {child.pid for child in proc.children(recursive=True)}
+            if active_pid in child_pids:
                 return True
-            
-            hwnds = []
-            win32gui.EnumWindows(enum_windows_callback, hwnds)
-            print(f"DEBUG: для PID {game_pid} найдено окон: {len(hwnds)}")
-            for hwnd in hwnds:
-                title = win32gui.GetWindowText(hwnd)
-                print(f"DEBUG:   окно: {title}")
-            
-            # Проверяем, является ли одно из окон игры активным
-            active_hwnd = win32gui.GetForegroundWindow()
-            active_title = win32gui.GetWindowText(active_hwnd)
-            print(f"DEBUG: активное окно PID={active_pid}, HWND={active_hwnd}, title={active_title}")
-            if active_hwnd in hwnds:
-                print("DEBUG: активное окно найдено среди окон игры, возвращаем True")
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+        # Проверяем, не является ли game_pid родителем active_pid (например, при лаунчере)
+        try:
+            active_proc = psutil.Process(active_pid)
+            if active_proc.ppid() == game_pid:
                 return True
-            else:
-                print("DEBUG: активное окно НЕ найдено среди окон игры")
-        except Exception as e:
-            print(f"DEBUG: ошибка проверки окон: {e}")
-        
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
         return False
 
     def _flush_session(self, game_id: int, session_info: Dict[str, Any]) -> None:

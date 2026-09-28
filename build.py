@@ -36,7 +36,7 @@ def run_pyinstaller():
         "pyinstaller",
         "--onefile",                  # один exe файл
         "--windowed",                 # без консоли (оконное приложение)
-        f"--icon={os.path.abspath('assets/app.ico')}",     # иконка для exe
+        "--icon=assets/app.ico",      # иконка для exe
         "--name=GameTimeTracker",     # имя выходного файла
         "--add-data=assets;assets",   # папка assets
         "--add-data=ui;ui",           # папка ui (все вкладки)

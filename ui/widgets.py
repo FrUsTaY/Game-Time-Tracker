@@ -130,7 +130,6 @@ class GameCard(ctk.CTkFrame):
         status_text = "🟢 Сейчас играю" if is_active else "⚪ Не играю"
         status_color = "#00ff88" if is_active else "#888888"
         self.info_label.configure(text=f"{time_text}  |  {status_text}", text_color=status_color)
-        self.update_idletasks()
 
 
 class ArchiveCard(ctk.CTkFrame):

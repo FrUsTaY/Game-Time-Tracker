@@ -126,6 +126,9 @@ class TabCalendar(ctk.CTkFrame):
         self._update_month_label()
         self.after(0, self.load_month_data)
 
+    def refresh(self):
+        self.load_month_data()
+
     def load_month_data(self):
         if self.is_loading:
             return

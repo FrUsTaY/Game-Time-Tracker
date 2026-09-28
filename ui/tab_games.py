@@ -426,14 +426,30 @@ class TabGames(ctk.CTkFrame):
         self.refresh_games()
         self._refresh_archive_tab()
 
+    def refresh(self):
+        self.refresh_games()
+
+    def _get_main_window(self):
+        main_win = getattr(self, 'main_window', None)
+        if main_win:
+            return main_win
+        try:
+            top = self.winfo_toplevel()
+            if hasattr(top, 'refresh_tab') or hasattr(top, 'tabs_cache'):
+                return top
+        except Exception:
+            pass
+        return None
+
     def _refresh_archive_tab(self):
         # Обновляем вкладку архива, если она уже существует в кеше
-        if hasattr(self.master_window, 'tabs_cache') and 'archive' in self.master_window.tabs_cache:
-            self.master_window.tabs_cache['archive'].refresh()
-            print("DEBUG: Архив обновлён через tabs_cache")
-        else:
-            # Если вкладка ещё не создана, ничего не делаем (она обновится при первом открытии)
-            print("DEBUG: Архив ещё не создан, пропускаем обновление")
+        main_win = self._get_main_window()
+        if main_win and hasattr(main_win, 'refresh_tab'):
+            main_win.refresh_tab('archive')
+        elif main_win and hasattr(main_win, 'tabs_cache') and 'archive' in main_win.tabs_cache:
+            archive_tab = main_win.tabs_cache['archive']
+            if hasattr(archive_tab, 'refresh'):
+                archive_tab.refresh()
 
     def rename_game(self, game_id: int, new_name: str):
         self.db.rename_game(game_id, new_name)

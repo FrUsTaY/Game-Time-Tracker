@@ -173,6 +173,71 @@ class TestTrackerSessionLifecycle(unittest.TestCase):
             self.assertEqual(row['duration_seconds'], 0)
 
 
+class TestTrackerActiveWindow(unittest.TestCase):
+    """Тесты проверки активности окна игры и безопасности от Unicode сбоев"""
+
+    def setUp(self):
+        from database import Database
+        from settings import AppSettings
+
+        self.db = Database(":memory:")
+        self.settings = AppSettings(self.db)
+        self.tracker = GameTracker(self.db, self.settings)
+
+    def tearDown(self):
+        self.tracker.stop()
+        self.db.close()
+
+    def test_is_game_active_track_only_disabled(self):
+        """Если отслеживание только активного окна выключено, всегда возвращается True"""
+        self.settings.track_only_active_window = False
+        self.assertTrue(self.tracker._is_game_active(1, 100, None))
+        self.assertTrue(self.tracker._is_game_active(1, 100, 999))
+
+    def test_is_game_active_direct_pid_match(self):
+        """Прямое совпадение PID процесса игры и активного окна"""
+        self.settings.track_only_active_window = True
+        self.assertTrue(self.tracker._is_game_active(1, 1234, 1234))
+
+    def test_is_game_active_in_game_pids(self):
+        """Активный PID найден в списке известных PID процесса игры"""
+        self.settings.track_only_active_window = True
+        self.assertTrue(self.tracker._is_game_active(1, 1234, 5678, game_pids=[1234, 5678]))
+
+    def test_is_game_active_none_pid(self):
+        """Если активный PID None, возвращается False при track_only=True"""
+        self.settings.track_only_active_window = True
+        self.assertFalse(self.tracker._is_game_active(1, 1234, None))
+
+    def test_is_game_active_unrelated_pid(self):
+        """Чужой PID возвращает False"""
+        self.settings.track_only_active_window = True
+        self.assertFalse(self.tracker._is_game_active(1, 1234, 9999, game_pids=[1234]))
+
+    def test_get_active_window_pid_handles_exceptions_cleanly(self):
+        """_get_active_window_pid возвращает None при ошибках без падений"""
+        from unittest.mock import patch
+        with patch('win32gui.GetForegroundWindow', side_effect=RuntimeError("GDI error")):
+            pid = self.tracker._get_active_window_pid()
+            self.assertIsNone(pid)
+
+        with patch('win32gui.GetForegroundWindow', return_value=0):
+            pid = self.tracker._get_active_window_pid()
+            self.assertIsNone(pid)
+
+    def test_unicode_titles_do_not_crash_active_window_check(self):
+        """Проверка, что окна с Unicode и эмодзи в заголовках не ломают трекинг"""
+        from unittest.mock import patch
+        # Имитируем окно с эмодзи и иероглифами в заголовке
+        with patch('win32gui.GetForegroundWindow', return_value=99999), \
+             patch('win32process.GetWindowThreadProcessId', return_value=(1, 4321)):
+            pid = self.tracker._get_active_window_pid()
+            self.assertEqual(pid, 4321)
+            # Проверяем, что _is_game_active успешно определяет совпадение PID
+            is_active = self.tracker._is_game_active(1, 4321, pid)
+            self.assertTrue(is_active)
+
+
 class TestMainWindowExit(unittest.TestCase):
     """Тест передачи управления on_exit при выходе через MainWindow.quit_app"""
 

@@ -119,26 +119,48 @@ class MainWindow(ctk.CTk):
         if self.settings.minimize_to_tray_on_start:
             self.after(100, self.hide_to_tray)
 
-    def show_tab(self, key, tab_class):
-        # Если вкладка уже создана и видима, ничего не делаем
+    def _refresh_tab_instance(self, tab):
+        """Вызывает метод обновления данных у экземпляра вкладки, если он существует."""
+        try:
+            if hasattr(tab, "refresh"):
+                tab.refresh()
+            elif hasattr(tab, "refresh_games"):
+                tab.refresh_games()
+            elif hasattr(tab, "load_stats"):
+                tab.load_stats()
+            elif hasattr(tab, "load_month_data"):
+                tab.load_month_data()
+        except Exception as e:
+            print(f"Ошибка обновления вкладки: {e}")
+            traceback.print_exc()
+
+    def refresh_tab(self, key: str):
+        """Обновляет вкладку по её ключу из кэша tabs_cache."""
         if key in self.tabs_cache:
-            # Если она уже отображается, просто возвращаемся
+            self._refresh_tab_instance(self.tabs_cache[key])
+
+    def show_tab(self, key, tab_class):
+        if key in self.tabs_cache:
+            # Если она уже отображается, просто обновляем её данные
             if self.current_tab_key == key:
+                self._refresh_tab_instance(self.tabs_cache[key])
                 return
             # Скрываем текущую вкладку
             if self.current_tab is not None:
                 self.current_tab.grid_forget()
-            # Показываем нужную вкладку
+            # Показываем нужную вкладку и обновляем в ней данные
             new_tab = self.tabs_cache[key]
             new_tab.grid(row=0, column=0, sticky="nsew")
             self.current_tab = new_tab
             self.current_tab_key = key
+            self._refresh_tab_instance(new_tab)
         else:
             # Создаём новую вкладку и прячем старую
             if self.current_tab is not None:
                 self.current_tab.grid_forget()
             try:
                 new_tab = tab_class(self.content_frame, self.db, self.tracker, self.settings)
+                new_tab.main_window = self
                 new_tab.grid(row=0, column=0, sticky="nsew")
                 self.tabs_cache[key] = new_tab
                 self.current_tab = new_tab
@@ -156,7 +178,15 @@ class MainWindow(ctk.CTk):
                 btn.configure(fg_color="transparent", text_color="#e0e0e0")
 
     def open_settings(self):
-        SettingsWindow(self, self.db, self.settings)
+        if hasattr(self, '_settings_window') and self._settings_window is not None:
+            try:
+                if self._settings_window.winfo_exists():
+                    self._settings_window.lift()
+                    self._settings_window.focus_force()
+                    return
+            except Exception:
+                pass
+        self._settings_window = SettingsWindow(self, self.db, self.settings)
 
     def hide_to_tray(self):
         self.withdraw()
@@ -164,6 +194,10 @@ class MainWindow(ctk.CTk):
 
     def show_window(self):
         self.deiconify()
+        try:
+            self.state("normal")
+        except Exception:
+            pass
         self.lift()
         self.focus_force()
 

@@ -52,9 +52,6 @@ class App:
                         except Exception:
                             pass
                 self.tracker.on_tick = _safe_dispatch_tick
-                print("DEBUG: on_tick установлен на games_tab.update_tick через window.after")
-        else:
-            print("DEBUG: Вкладка games не найдена в кеше")
         self.tracker.start()
 
     def _init_tray(self):
@@ -64,6 +61,8 @@ class App:
             on_settings=self.open_settings,
             on_exit=self.exit_app
         )
+        if self.tracker:
+            self.tracker.tray = self.tray
         self.tray.start()
         if self.settings.minimize_to_tray_on_start:
             self.window.after(100, self.window.hide_to_tray)
@@ -72,13 +71,23 @@ class App:
                 "Приложение запущено и работает в фоновом режиме"
             )
 
-    def show_window(self):
-        if self.window:
-            self.window.show_window()
+    def show_notification(self, title: str, message: str):
+        if self.tray:
+            self.tray.show_notification(title, message)
 
-    def open_settings(self):
+    def show_window(self, *args):
         if self.window:
-            self.window.open_settings()
+            try:
+                self.window.after(0, self.window.show_window)
+            except Exception:
+                pass
+
+    def open_settings(self, *args):
+        if self.window:
+            try:
+                self.window.after(0, self.window.open_settings)
+            except Exception:
+                pass
 
     def on_window_close(self):
         if self.tray:
@@ -88,19 +97,52 @@ class App:
             )
         self.window.hide_to_tray()
 
-    def exit_app(self):
+    def exit_app(self, *args):
+        if self._is_exiting:
+            return
+        if self.window:
+            try:
+                self.window.after(0, self._perform_exit)
+                return
+            except Exception:
+                pass
+        self._perform_exit()
+
+    def _perform_exit(self):
         if self._is_exiting:
             return
         self._is_exiting = True
+
+        # 1. Остановка трекера (сохраняет накопленные данные сессий в БД)
         if self.tracker:
-            self.tracker.stop()
+            try:
+                self.tracker.stop()
+            except Exception as e:
+                print(f"Ошибка при остановке трекера: {e}")
+
+        # 2. Остановка трея
         if self.tray:
-            self.tray.stop()
-        if self.window:
-            self.window.quit()
-            self.window.destroy()
+            try:
+                self.tray.stop()
+            except Exception as e:
+                print(f"Ошибка при остановке трея: {e}")
+
+        # 3. Закрытие соединения с базой данных
         if self.db:
-            self.db.close()
+            try:
+                self.db.close()
+            except Exception as e:
+                print(f"Ошибка при закрытии базы данных: {e}")
+
+        # 4. Завершение работы Tkinter и уничтожение главного окна
+        if self.window:
+            try:
+                self.window.quit()
+                self.window.destroy()
+            except Exception as e:
+                print(f"Ошибка при уничтожении окна: {e}")
+
+        # 5. Завершение процесса
         sys.exit(0)
 
     def run(self):

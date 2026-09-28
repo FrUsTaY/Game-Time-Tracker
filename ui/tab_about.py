@@ -9,7 +9,12 @@ import tkinter.messagebox as messagebox
 from utils import get_base_dir, resource_path
 
 
+APP_VERSION = "v1.1.1"
+
+
 class TabAbout(ctk.CTkFrame):
+    APP_VERSION = APP_VERSION
+
     def __init__(self, master, db=None, tracker=None, settings=None):
         super().__init__(master, fg_color="#0d0d0d")
         self.db = db
@@ -58,7 +63,7 @@ class TabAbout(ctk.CTkFrame):
         title_label.grid(row=1, column=0, pady=(0, 5))
 
         version_label = ctk.CTkLabel(
-            content, text="v1.1.0",
+            content, text=APP_VERSION,
             font=("Segoe UI", 12), text_color="#888888"
         )
         version_label.grid(row=2, column=0, pady=(0, 15))
@@ -149,7 +154,7 @@ class TabAbout(ctk.CTkFrame):
             parent.grid_columnconfigure(i, weight=1)
 
     def check_updates(self):
-        messagebox.showinfo("Проверка обновлений", "Вы используете актуальную версию (v1.0.0)")
+        messagebox.showinfo("Проверка обновлений", f"Вы используете актуальную версию ({APP_VERSION})")
 
     def _on_map(self, event):
         if event.widget == self:
@@ -194,3 +199,6 @@ class TabAbout(ctk.CTkFrame):
     def _start_pulse_animation(self):
         """Метод для обратной совместимости. Запускает оптимизированную анимацию."""
         self.start_animation()
+
+    def refresh(self):
+        pass
