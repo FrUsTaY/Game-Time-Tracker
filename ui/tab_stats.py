@@ -27,6 +27,12 @@ class TabStats(ctk.CTkFrame):
 
         plt.style.use('dark_background')
         self._setup_matplotlib_style()
+
+        self.top_fig = None
+        self.top_canvas = None
+        self.activity_fig = None
+        self.activity_canvas = None
+
         self._build_ui()
         self.load_stats()
 
@@ -135,36 +141,19 @@ class TabStats(ctk.CTkFrame):
         total_hours = total_seconds / 3600
         self.card_total_hours.value_label.configure(text=f"{total_hours:.1f} ч")
 
-        cursor = self.db.conn.cursor()
-        cursor.execute('''
-            SELECT s.duration_seconds, g.display_name, s.started_at
-            FROM sessions s
-            JOIN games g ON s.game_id = g.id
-            WHERE s.duration_seconds IS NOT NULL
-            ORDER BY s.duration_seconds DESC
-            LIMIT 1
-        ''')
-        longest = cursor.fetchone()
-        if longest and longest[0] > 0:
-            hours = longest[0] / 3600
-            game_name = longest[1]
-            date_str = longest[2][:10] if longest[2] else "—"
+        longest = self.db.get_longest_session()
+        if longest and longest.get('duration_seconds') and longest['duration_seconds'] > 0:
+            hours = longest['duration_seconds'] / 3600
+            game_name = longest['display_name']
+            date_str = longest['started_at'][:10] if longest.get('started_at') else "—"
             self.card_longest_session.value_label.configure(text=f"{game_name}\n{hours:.1f} ч ({date_str})")
         else:
             self.card_longest_session.value_label.configure(text="Нет данных")
 
-        cursor.execute('''
-            SELECT DATE(s.started_at) as day, SUM(s.duration_seconds) as total
-            FROM sessions s
-            WHERE s.duration_seconds IS NOT NULL
-            GROUP BY day
-            ORDER BY total DESC
-            LIMIT 1
-        ''')
-        best_day = cursor.fetchone()
-        if best_day and best_day[1] > 0:
-            hours = best_day[1] / 3600
-            self.card_best_day.value_label.configure(text=f"{best_day[0]}\n{hours:.1f} ч")
+        best_day = self.db.get_best_day()
+        if best_day and best_day.get('total') and best_day['total'] > 0:
+            hours = best_day['total'] / 3600
+            self.card_best_day.value_label.configure(text=f"{best_day['day']}\n{hours:.1f} ч")
         else:
             self.card_best_day.value_label.configure(text="Нет данных")
 
@@ -174,6 +163,11 @@ class TabStats(ctk.CTkFrame):
         games = self.db.get_all_games(archived=False)
         games_sorted = sorted(games, key=lambda x: x['total_seconds'], reverse=True)[:top_n]
         if not games_sorted:
+            if self.top_fig is not None:
+                self.top_fig.clear()
+                plt.close(self.top_fig)
+                self.top_fig = None
+                self.top_canvas = None
             for widget in self.top_frame.winfo_children():
                 widget.destroy()
             label = ctk.CTkLabel(self.top_frame, text="Нет данных", text_color="#666666")
@@ -183,8 +177,16 @@ class TabStats(ctk.CTkFrame):
         names = [g['display_name'] for g in games_sorted]
         hours = [g['total_seconds'] / 3600 for g in games_sorted]
 
-        fig = Figure(figsize=(6, 4), dpi=100)
-        ax = fig.add_subplot()
+        if self.top_fig is None or self.top_canvas is None:
+            for widget in self.top_frame.winfo_children():
+                widget.destroy()
+            self.top_fig = Figure(figsize=(6, 4), dpi=100)
+            self.top_canvas = FigureCanvasTkAgg(self.top_fig, master=self.top_frame)
+            self.top_canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
+        else:
+            self.top_fig.clear()
+
+        ax = self.top_fig.add_subplot()
         bars = ax.barh(names, hours, color='#00d4ff', edgecolor='#7b2fff', height=0.6)
         for bar, h in zip(bars, hours):
             ax.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height()/2,
@@ -192,12 +194,8 @@ class TabStats(ctk.CTkFrame):
         ax.set_xlabel('Часы', color='#e0e0e0')
         ax.set_title('Топ игр по времени', color='#00d4ff')
         ax.invert_yaxis()
-
-        for widget in self.top_frame.winfo_children():
-            widget.destroy()
-        canvas = FigureCanvasTkAgg(fig, master=self.top_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
+        self.top_fig.tight_layout()
+        self.top_canvas.draw()
 
     def update_activity_graph(self):
         days = int(self.period_var.get())
@@ -221,19 +219,23 @@ class TabStats(ctk.CTkFrame):
             hours_list.append(secs / 3600)
             current += timedelta(days=1)
 
-        fig = Figure(figsize=(8, 4), dpi=100)
-        ax = fig.add_subplot()
+        if self.activity_fig is None or self.activity_canvas is None:
+            for widget in self.activity_frame.winfo_children():
+                widget.destroy()
+            self.activity_fig = Figure(figsize=(8, 4), dpi=100)
+            self.activity_canvas = FigureCanvasTkAgg(self.activity_fig, master=self.activity_frame)
+            self.activity_canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
+        else:
+            self.activity_fig.clear()
+
+        ax = self.activity_fig.add_subplot()
         ax.bar(dates, hours_list, color='#7b2fff', edgecolor='#00d4ff', alpha=0.7)
         ax.set_xlabel('Дата', color='#e0e0e0')
         ax.set_ylabel('Часы', color='#e0e0e0')
         ax.set_title(f'Активность за последние {days} дней', color='#00d4ff')
         plt.setp(ax.get_xticklabels(), rotation=45, ha='right', fontsize=8)
-
-        for widget in self.activity_frame.winfo_children():
-            widget.destroy()
-        canvas = FigureCanvasTkAgg(fig, master=self.activity_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
+        self.activity_fig.tight_layout()
+        self.activity_canvas.draw()
 
     def _update_avg_session_time(self):
         for widget in self.avg_table.winfo_children():
@@ -245,16 +247,7 @@ class TabStats(ctk.CTkFrame):
         ctk.CTkLabel(header_frame, text="Сессий", font=("Segoe UI", 12, "bold"), width=80, anchor="center").pack(side="left")
         ctk.CTkLabel(header_frame, text="Среднее время", font=("Segoe UI", 12, "bold"), width=120, anchor="center").pack(side="left")
 
-        cursor = self.db.conn.cursor()
-        cursor.execute('''
-            SELECT g.display_name, COUNT(s.id) as session_count, AVG(s.duration_seconds) as avg_sec
-            FROM games g
-            LEFT JOIN sessions s ON g.id = s.game_id
-            WHERE g.is_archived = 0 AND s.duration_seconds IS NOT NULL
-            GROUP BY g.id
-            ORDER BY avg_sec DESC
-        ''')
-        rows = cursor.fetchall()
+        rows = self.db.get_games_session_stats()
 
         if not rows:
             empty_label = ctk.CTkLabel(self.avg_table, text="Нет данных о сессиях", text_color="#666666")
@@ -262,9 +255,9 @@ class TabStats(ctk.CTkFrame):
             return
 
         for row in rows:
-            game_name = row[0]
-            count = row[1]
-            avg_sec = row[2] or 0
+            game_name = row['display_name']
+            count = row['session_count']
+            avg_sec = row['avg_sec'] or 0
             avg_hours = avg_sec / 3600
             if avg_hours >= 1:
                 avg_str = f"{avg_hours:.1f} ч"
@@ -277,3 +270,25 @@ class TabStats(ctk.CTkFrame):
             ctk.CTkLabel(row_frame, text=game_name, width=200, anchor="w", font=("Segoe UI", 11)).pack(side="left", padx=5)
             ctk.CTkLabel(row_frame, text=str(count), width=80, anchor="center", font=("Segoe UI", 11)).pack(side="left")
             ctk.CTkLabel(row_frame, text=avg_str, width=120, anchor="center", font=("Consolas", 11), text_color="#00d4ff").pack(side="left")
+
+    def destroy(self):
+        """Очищает ресурсы графиков Matplotlib при уничтожении вкладки."""
+        if getattr(self, 'top_fig', None) is not None:
+            try:
+                self.top_fig.clear()
+                plt.close(self.top_fig)
+            except Exception:
+                pass
+            self.top_fig = None
+            self.top_canvas = None
+
+        if getattr(self, 'activity_fig', None) is not None:
+            try:
+                self.activity_fig.clear()
+                plt.close(self.activity_fig)
+            except Exception:
+                pass
+            self.activity_fig = None
+            self.activity_canvas = None
+
+        super().destroy()

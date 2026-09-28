@@ -8,13 +8,7 @@ from PIL import Image, ImageDraw
 import os
 import sys
 from typing import Callable
-
-def resource_path(relative_path):
-    try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+from utils import resource_path
 
 
 class SystemTray:

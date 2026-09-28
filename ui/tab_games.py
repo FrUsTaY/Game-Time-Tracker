@@ -14,6 +14,7 @@ from ui.widgets import GameCard, SectionTitle
 from database import Database
 from tracker import GameTracker
 from settings import AppSettings
+from utils import get_base_dir
 
 
 class AddFromProcessesDialog(ctk.CTkToplevel):
@@ -144,7 +145,7 @@ class TabGames(ctk.CTkFrame):
         self.cards: Dict[int, GameCard] = {}
         self.current_games = []
 
-        self.icons_dir = "data/icons"
+        self.icons_dir = os.path.join(get_base_dir(), "data", "icons")
         os.makedirs(self.icons_dir, exist_ok=True)
 
         self._build_ui()
@@ -326,11 +327,6 @@ class TabGames(ctk.CTkFrame):
                 # Сбрасываем флаг при окончании сессии
                 if not is_active and hasattr(card, '_session_launched_updated'):
                     delattr(card, '_session_launched_updated')
-
-                self.scrollable_frame.update_idletasks()
-                self.update_idletasks()
-                if self.winfo_toplevel():
-                    self.winfo_toplevel().update_idletasks()
             else:
                 # Карточка уничтожена, но не удаляем из словаря – при следующем refresh_games() она пересоздастся
                 print(f"DEBUG: карточка game_id {game_id} уничтожена, но оставлена в cards для пересоздания")

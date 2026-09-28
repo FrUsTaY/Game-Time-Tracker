@@ -6,22 +6,16 @@ from settings import AppSettings
 from tracker import GameTracker
 from ui.main_window import MainWindow
 from tray import SystemTray
+from utils import get_base_dir, resource_path
 
 
-def get_app_dir():
-    """Возвращает абсолютный путь к директории, в которой находится исполняемый файл или скрипт."""
-    if getattr(sys, 'frozen', False):
-        # Если запущено как скомпилированный .exe (через PyInstaller)
-        return os.path.dirname(sys.executable)
-    else:
-        # Если запущено как обычный python скрипт
-        return os.path.dirname(os.path.abspath(__file__))
+get_app_dir = get_base_dir
 
 
 class App:
     def __init__(self):
         # Используем абсолютный путь для БД, чтобы избежать проблем с автозагрузкой
-        db_path = os.path.join(get_app_dir(), "data", "gametracker.db")
+        db_path = os.path.join(get_base_dir(), "data", "gametracker.db")
         self.db = Database(db_path)
         self.settings = AppSettings(self.db)
         # Настройки загружаются из БД, ничего не переопределяем
@@ -37,7 +31,7 @@ class App:
         self.window.protocol("WM_DELETE_WINDOW", self.on_window_close)
 
     def _init_ui(self):
-        self.window = MainWindow(self.db, None, self.settings)
+        self.window = MainWindow(self.db, None, self.settings, on_exit=self.exit_app)
 
     def _init_tracker(self):
         # Создаём трекер с временным колбэком
@@ -51,15 +45,21 @@ class App:
         if "games" in self.window.tabs_cache:
             games_tab = self.window.tabs_cache["games"]
             if hasattr(games_tab, 'update_tick'):
-                self.tracker.on_tick = games_tab.update_tick
-                print("DEBUG: on_tick установлен на games_tab.update_tick")
+                def _safe_dispatch_tick(gid, total, active):
+                    if not self._is_exiting and self.window:
+                        try:
+                            self.window.after(0, lambda: games_tab.update_tick(gid, total, active))
+                        except Exception:
+                            pass
+                self.tracker.on_tick = _safe_dispatch_tick
+                print("DEBUG: on_tick установлен на games_tab.update_tick через window.after")
         else:
             print("DEBUG: Вкладка games не найдена в кеше")
         self.tracker.start()
 
     def _init_tray(self):
         self.tray = SystemTray(
-            icon_path="assets/icon.png",
+            icon_path=resource_path("assets/icon.png"),
             on_open=self.show_window,
             on_settings=self.open_settings,
             on_exit=self.exit_app

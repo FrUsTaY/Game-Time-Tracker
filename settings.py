@@ -7,6 +7,7 @@ import winreg
 import sys
 import os
 from database import Database
+from utils import get_base_dir
 
 
 class AppSettings:
@@ -59,7 +60,8 @@ class AppSettings:
                 app_path = f'"{sys.executable}"'
             else:
                 # Запущено как скрипт
-                app_path = f'"{sys.executable}" "{os.path.abspath("main.py")}"'
+                main_script = os.path.abspath(os.path.join(get_base_dir(), "main.py"))
+                app_path = f'"{sys.executable}" "{main_script}"'
 
             winreg.SetValueEx(key, "GameTimeTracker", 0, winreg.REG_SZ, app_path)
             winreg.CloseKey(key)

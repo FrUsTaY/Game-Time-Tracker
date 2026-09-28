@@ -40,6 +40,7 @@ def run_pyinstaller():
         "--name=GameTimeTracker",     # имя выходного файла
         "--add-data=assets;assets",   # папка assets
         "--add-data=ui;ui",           # папка ui (все вкладки)
+        "--collect-all=customtkinter",# все ресурсы и темы customtkinter
         "--hidden-import=win32gui",   # явные импорты для pyinstaller
         "--hidden-import=win32process",
         "--hidden-import=win32ui",

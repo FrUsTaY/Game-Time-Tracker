@@ -5,11 +5,11 @@ settings_window.py — окно настроек GameTimeTracker.
 import customtkinter as ctk
 from tkinter import messagebox, filedialog
 import os
-import shutil
 from datetime import datetime
 
 from database import Database
 from settings import AppSettings
+from utils import get_base_dir
 
 
 class SettingsWindow(ctk.CTkToplevel):
@@ -211,19 +211,19 @@ class SettingsWindow(ctk.CTkToplevel):
                 messagebox.showerror("Ошибка", "Не удалось экспортировать данные")
 
     def backup_db(self):
-        backup_dir = "data/backups"
+        backup_dir = os.path.join(get_base_dir(), "data", "backups")
         os.makedirs(backup_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_name = f"gametracker_backup_{timestamp}.db"
         backup_path = os.path.join(backup_dir, backup_name)
         try:
-            shutil.copy2(self.db.db_path, backup_path)
+            self.db.backup_database(backup_path)
             messagebox.showinfo("Резервная копия", f"База данных сохранена:\n{backup_path}")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось создать резервную копию:\n{e}")
 
     def open_data_folder(self):
-        data_dir = os.path.abspath("data")
+        data_dir = os.path.join(get_base_dir(), "data")
         if os.path.exists(data_dir):
             os.startfile(data_dir)
         else:

@@ -2,8 +2,10 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-# Мокаем winreg до импорта settings, чтобы модуль мог загрузиться на Linux (где winreg отсутствует)
-sys.modules['winreg'] = MagicMock()
+try:
+    import winreg
+except ImportError:
+    sys.modules['winreg'] = MagicMock()
 
 import settings
 from settings import AppSettings

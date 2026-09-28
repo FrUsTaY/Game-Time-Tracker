@@ -1,12 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_all
+
+datas = [('assets', 'assets'), ('ui', 'ui')]
+binaries = []
+hiddenimports = ['win32gui', 'win32process', 'win32ui', 'win32con', 'psutil', 'pystray', 'matplotlib', 'customtkinter', 'PIL']
+tmp_ret = collect_all('customtkinter')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
-    datas=[('assets', 'assets'), ('ui', 'ui')],
-    hiddenimports=['win32gui', 'win32process', 'win32ui', 'win32con', 'psutil', 'pystray', 'matplotlib', 'customtkinter', 'PIL'],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -35,5 +42,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['C:\\Users\\Emix\\Desktop\\Game Time Tracker\\assets\\app.ico'],
+    icon=['C:/Users/admin/Desktop/Game-Time-Tracker/assets/app.ico'],
 )

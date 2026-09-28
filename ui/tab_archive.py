@@ -2,9 +2,11 @@
 tab_archive.py — вкладка «Архив» для GameTimeTracker.
 """
 
+import os
 import customtkinter as ctk
 from ui.widgets import ArchiveCard, SectionTitle
 from database import Database
+from utils import get_base_dir
 
 
 class TabArchive(ctk.CTkFrame):
@@ -14,7 +16,7 @@ class TabArchive(ctk.CTkFrame):
         self.tracker = tracker
         self.settings = settings
         self.master_window = master
-        self.icons_dir = "data/icons"
+        self.icons_dir = os.path.join(get_base_dir(), "data", "icons")
 
         self._build_ui()
         self.refresh()

@@ -31,8 +31,9 @@ class GameTracker:
         self.settings = settings
         self.on_tick = on_tick
 
-        # Активные сессии: {game_id: {'session_id': int, 'current_seconds': int, 'process_pid': int, 'was_active': bool}}
+        # Активные сессии: {game_id: {'session_id': int, 'current_seconds': int, 'last_flushed_seconds': int, 'initial_total_seconds': int, 'process_pid': int, 'was_active': bool}}
         self.active_sessions: Dict[int, Dict[str, Any]] = {}
+        self.flush_interval = 60  # Интервал периодического сброса прогресса в БД (секунды)
         self.lock = threading.Lock()
 
         self._running = False
@@ -146,18 +147,20 @@ class GameTracker:
                 # Отладка
                 print(f"DEBUG: game_id {game_id}, active_pid={active_pid}, game_pid={tracked_games[game_id]['pid']}, is_active={is_active}, track_only={self.settings.track_only_active_window}")
                 if is_active:
-                    # Увеличиваем время текущей сессии (только локально)
+                    # Увеличиваем время текущей сессии
                     session_info['current_seconds'] += 1
-                    # НЕ обновляем БД каждую секунду, только при завершении сессии
-                    # Получаем ранее сохранённое общее время из уже загруженных данных (без учёта текущей сессии)
-                    game = tracked_games.get(game_id, {}).get('game_info')
-                    saved_seconds = game['total_seconds'] if game else 0
-                    total_seconds = saved_seconds + session_info['current_seconds']
-                    print(f"DEBUG: вызываем on_tick для game_id {game_id}, total_seconds={total_seconds} (сессия={session_info['current_seconds']}, сохранено={saved_seconds})")
+                    initial_sec = session_info.setdefault('initial_total_seconds', 0)
+                    total_seconds = initial_sec + session_info['current_seconds']
+                    print(f"DEBUG: вызываем on_tick для game_id {game_id}, total_seconds={total_seconds} (сессия={session_info['current_seconds']}, база={initial_sec})")
                     if self.on_tick:
                         self.on_tick(game_id, total_seconds, True)
                     else:
                         print("DEBUG: on_tick is None!")
+
+                    # Периодический сброс прогресса в БД (раз в flush_interval секунд)
+                    unflushed = session_info['current_seconds'] - session_info.get('last_flushed_seconds', 0)
+                    if unflushed >= self.flush_interval:
+                        self._flush_session(game_id, session_info)
                 # Если не активно, ничего не добавляем, но сессию не закрываем
 
             # 2. Создаём новые сессии для вновь запущенных игр
@@ -168,9 +171,12 @@ class GameTracker:
                     session_id = self.db.start_session(game_id)
                     # Обновляем last_launched (без добавления секунд)
                     self.db.update_game_time(game_id, 0)
+                    initial_sec = proc_info['game_info'].get('total_seconds', 0) if proc_info.get('game_info') else 0
                     self.active_sessions[game_id] = {
                         'session_id': session_id,
                         'current_seconds': 0,
+                        'last_flushed_seconds': 0,
+                        'initial_total_seconds': initial_sec,
                         'process_pid': proc_info['pid'],
                         'was_active': False
                     }
@@ -234,23 +240,41 @@ class GameTracker:
         
         return False
 
+    def _flush_session(self, game_id: int, session_info: Dict[str, Any]) -> None:
+        """Периодический сброс накопленного прогресса активной сессии в БД"""
+        unflushed = session_info['current_seconds'] - session_info.get('last_flushed_seconds', 0)
+        if unflushed > 0:
+            try:
+                self.db.update_game_time(game_id, unflushed)
+                self.db.update_session_duration(session_info['session_id'], session_info['current_seconds'])
+                session_info['last_flushed_seconds'] = session_info['current_seconds']
+                print(f"GameTracker: сброс прогресса сессии {session_info['session_id']} (игра ID {game_id}): +{unflushed} сек, всего {session_info['current_seconds']} сек")
+            except Exception as e:
+                print(f"GameTracker: ошибка при периодическом сбросе прогресса: {e}")
+
     def _close_session(self, game_id: int, session_info: Dict[str, Any], force: bool = False) -> None:
         session_id = session_info['session_id']
         seconds = session_info['current_seconds']
+        last_flushed = session_info.get('last_flushed_seconds', 0)
+        unflushed = seconds - last_flushed
 
-        if seconds > 0 or force:
+        try:
+            if unflushed > 0:
+                self.db.update_game_time(game_id, unflushed)
+                session_info['last_flushed_seconds'] = seconds
             self.db.end_session(session_id, seconds)
-            # Не обновляем update_game_time повторно, так как уже обновляли каждую секунду
-            # Но на случай принудительного закрытия без активности
-            if seconds > 0:
-                self.db.update_game_time(game_id, seconds)  # уже обновлено, но оставим для синхронизации
             print(f"GameTracker: завершена сессия {session_id} для игры ID {game_id}, секунд: {seconds}")
-            # После завершения сессии нужно обновить UI, чтобы статус стал "не играю"
-            if self.on_tick:
-                # Получаем текущее общее время игры
-                game = self.db.get_game_by_id(game_id)
-                total_seconds = game['total_seconds'] if game else 0
+        except Exception as e:
+            print(f"GameTracker: ошибка при сохранении завершения сессии {session_id}: {e}")
+
+        # После завершения сессии нужно обновить UI, чтобы статус стал "не играю"
+        if self.on_tick:
+            initial_sec = session_info.get('initial_total_seconds', 0)
+            total_seconds = initial_sec + seconds
+            try:
                 self.on_tick(game_id, total_seconds, False)
+            except Exception as e:
+                print(f"GameTracker: ошибка в on_tick при завершении сессии: {e}")
 
         if game_id in self.active_sessions:
             del self.active_sessions[game_id]
@@ -275,6 +299,14 @@ class GameTracker:
     def get_exe_icon(self, exe_path: str, size: int = 32) -> Optional[Image.Image]:
         if not exe_path or not os.path.exists(exe_path):
             return None
+
+        large_icons, small_icons = [], []
+        hdc_raw = None
+        hdc = None
+        hdc_mem = None
+        hbmp = None
+        old_bmp = None
+
         try:
             large_icons, small_icons = win32gui.ExtractIconEx(exe_path, 0)
             if large_icons and large_icons[0]:
@@ -284,23 +316,55 @@ class GameTracker:
             else:
                 return None
 
-            hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+            hdc_raw = win32gui.GetDC(0)
+            if not hdc_raw:
+                return None
+
+            hdc = win32ui.CreateDCFromHandle(hdc_raw)
             hbmp = win32ui.CreateBitmap()
             hbmp.CreateCompatibleBitmap(hdc, size, size)
             hdc_mem = hdc.CreateCompatibleDC()
-            hdc_mem.SelectObject(hbmp)
+            old_bmp = hdc_mem.SelectObject(hbmp)
 
             win32gui.DrawIconEx(hdc_mem.GetSafeHdc(), 0, 0, hicon, size, size, 0, None, win32con.DI_NORMAL)
 
             bmp_bits = hbmp.GetBitmapBits(True)
             img = Image.frombuffer('RGBA', (size, size), bmp_bits, 'raw', 'BGRA', 0, 1)
 
-            win32gui.DestroyIcon(hicon)
-            hdc_mem.DeleteDC()
-            # hbmp.DeleteObject()  # 'PyCBitmap' не имеет метода DeleteObject
-            hdc.DeleteDC()
-
             return img
         except Exception as e:
             print(f"Ошибка извлечения иконки из {exe_path}: {e}")
             return None
+        finally:
+            for h in large_icons + small_icons:
+                try:
+                    if h:
+                        win32gui.DestroyIcon(h)
+                except Exception:
+                    pass
+
+            if hdc_mem is not None:
+                try:
+                    if old_bmp is not None:
+                        hdc_mem.SelectObject(old_bmp)
+                    hdc_mem.DeleteDC()
+                except Exception:
+                    pass
+
+            if hbmp is not None:
+                try:
+                    win32gui.DeleteObject(hbmp.GetHandle())
+                except Exception:
+                    pass
+
+            if hdc is not None:
+                try:
+                    hdc.DeleteDC()
+                except Exception:
+                    pass
+
+            if hdc_raw is not None:
+                try:
+                    win32gui.ReleaseDC(0, hdc_raw)
+                except Exception:
+                    pass

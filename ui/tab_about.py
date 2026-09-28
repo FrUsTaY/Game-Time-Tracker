@@ -5,16 +5,8 @@ tab_about.py — вкладка «О программе» для GameTimeTracker
 import customtkinter as ctk
 from PIL import Image, ImageTk
 import os
-import sys
 import tkinter.messagebox as messagebox
-
-def resource_path(relative_path):
-    """Возвращает абсолютный путь к ресурсу, работает и в .exe и в .py."""
-    try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+from utils import get_base_dir, resource_path
 
 
 class TabAbout(ctk.CTkFrame):
@@ -24,13 +16,23 @@ class TabAbout(ctk.CTkFrame):
         self.tracker = tracker
         self.settings = settings
 
-        self.pulse_step = 0
-        self.pulse_direction = 1
+        self.pulse_frames = []
+        self._current_frame_idx = 0
+        self._animating = False
+        self._after_id = None
         self.logo_image = None
         self.logo_photo = None
 
         self._build_ui()
-        self._start_pulse_animation()
+
+        # Привязка к событиям видимости вкладки для экономии CPU
+        self.bind("<Map>", self._on_map)
+        self.bind("<Unmap>", self._on_unmap)
+        self.bind("<Destroy>", self._on_destroy)
+
+        # Если вкладка уже отображается, запускаем анимацию
+        if self.winfo_ismapped():
+            self.start_animation()
 
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
@@ -56,7 +58,7 @@ class TabAbout(ctk.CTkFrame):
         title_label.grid(row=1, column=0, pady=(0, 5))
 
         version_label = ctk.CTkLabel(
-            content, text="v1.0.0",
+            content, text="v1.1.0",
             font=("Segoe UI", 12), text_color="#888888"
         )
         version_label.grid(row=2, column=0, pady=(0, 15))
@@ -102,17 +104,32 @@ class TabAbout(ctk.CTkFrame):
 
     def _load_logo(self):
         icon_path = resource_path("assets/icon.png")
+        self.pulse_frames = []
         if os.path.exists(icon_path):
             try:
-                self.logo_image = Image.open(icon_path)
-                self.logo_image = self.logo_image.resize((128, 128), Image.Resampling.LANCZOS)
-                self.logo_photo = ImageTk.PhotoImage(self.logo_image)
+                raw_image = Image.open(icon_path)
+                self.logo_image = raw_image.copy()
+
+                # Предварительный расчет 7 кадров анимации пульсации (размеры 128..140 с шагом 2)
+                sizes = [128, 130, 132, 134, 136, 138, 140]
+                cached_photos = {}
+                for size in sizes:
+                    resized = raw_image.resize((size, size), Image.Resampling.LANCZOS)
+                    cached_photos[size] = ctk.CTkImage(light_image=resized, dark_image=resized, size=(size, size))
+
+                frame_sequence = [128, 130, 132, 134, 136, 138, 140, 138, 136, 134, 132, 130]
+                self.pulse_frames = [cached_photos[s] for s in frame_sequence]
+                self.logo_photo = cached_photos[128]
                 self.logo_label.configure(image=self.logo_photo)
             except Exception as e:
                 print(f"Ошибка загрузки логотипа: {e}")
+                self.logo_image = None
+                self.logo_photo = None
                 self.logo_label.configure(text="🎮", font=("Segoe UI", 64))
         else:
             print(f"Файл не найден: {icon_path}")
+            self.logo_image = None
+            self.logo_photo = None
             self.logo_label.configure(text="🎮", font=("Segoe UI", 64))
 
     def _add_tech_chips(self, parent, tech_list):
@@ -134,26 +151,46 @@ class TabAbout(ctk.CTkFrame):
     def check_updates(self):
         messagebox.showinfo("Проверка обновлений", "Вы используете актуальную версию (v1.0.0)")
 
-    def _start_pulse_animation(self):
-        if self.logo_image is None:
+    def _on_map(self, event):
+        if event.widget == self:
+            self.start_animation()
+
+    def _on_unmap(self, event):
+        if event.widget == self:
+            self.stop_animation()
+
+    def _on_destroy(self, event):
+        if event.widget == self:
+            self.stop_animation()
+
+    def start_animation(self):
+        """Запуск цикла анимации пульсации логотипа."""
+        if self._animating or not self.pulse_frames:
             return
-        base_size = 128
-        delta = self.pulse_step
-        if self.pulse_direction == 1:
-            delta += 2
-            if delta >= 12:
-                self.pulse_direction = -1
-        else:
-            delta -= 2
-            if delta <= 0:
-                self.pulse_direction = 1
-        self.pulse_step = delta
-        new_size = base_size + delta
-        try:
-            resized = self.logo_image.resize((new_size, new_size), Image.Resampling.LANCZOS)
-            new_photo = ImageTk.PhotoImage(resized)
-            self.logo_label.configure(image=new_photo)
-            self.logo_label.image = new_photo
-        except Exception:
-            pass
-        self.after(50, self._start_pulse_animation)
+        self._animating = True
+        self._animate_step()
+
+    def stop_animation(self):
+        """Остановка цикла анимации пульсации для устранения паразитной нагрузки на CPU."""
+        self._animating = False
+        if self._after_id is not None:
+            try:
+                self.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
+    def _animate_step(self):
+        """Один шаг переключения предрассчитанных кадров анимации без повторного ресайза."""
+        if not self._animating or not self.pulse_frames:
+            self._after_id = None
+            return
+
+        frame = self.pulse_frames[self._current_frame_idx]
+        self.logo_label.configure(image=frame)
+        self._current_frame_idx = (self._current_frame_idx + 1) % len(self.pulse_frames)
+        self._after_id = self.after(50, self._animate_step)
+
+    def _start_pulse_animation(self):
+        """Метод для обратной совместимости. Запускает оптимизированную анимацию."""
+        self.start_animation()

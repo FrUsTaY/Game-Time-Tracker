@@ -10,21 +10,16 @@ from ui.tab_archive import TabArchive
 from ui.tab_stats import TabStats
 from ui.tab_about import TabAbout
 from ui.settings_window import SettingsWindow
-
-def resource_path(relative_path):
-    try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+from utils import get_base_dir, resource_path
 
 
 class MainWindow(ctk.CTk):
-    def __init__(self, db, tracker, settings):
+    def __init__(self, db, tracker, settings, on_exit=None):
         super().__init__()
         self.db = db
         self.tracker = tracker
         self.settings = settings
+        self.on_exit = on_exit
         self.current_tab = None
         self.current_tab_key = None
         self.tabs_cache = {}   # Для хранения ссылок на созданные вкладки (если нужно обновлять время)
@@ -180,7 +175,10 @@ class MainWindow(ctk.CTk):
 
     def quit_app(self):
         """Полное завершение приложения."""
-        self.quit()
-        self.destroy()
-        import sys
-        sys.exit(0)
+        if self.on_exit:
+            self.on_exit()
+        else:
+            self.quit()
+            self.destroy()
+            import sys
+            sys.exit(0)

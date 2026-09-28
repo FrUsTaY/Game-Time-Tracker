@@ -761,5 +761,257 @@ class TestDatabaseEndSessionAndDelete(unittest.TestCase):
         self.assertIsNone(deleted_session)
 
 
+class TestDatabaseStatsMethods(unittest.TestCase):
+    """Тесты для статистических методов класса Database"""
+
+    def setUp(self):
+        self.db = Database(":memory:")
+        self.game1_id = self.db.add_game("game1.exe", "Game One")
+        self.game2_id = self.db.add_game("game2.exe", "Game Two")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_empty_stats(self):
+        """Проверка статистических методов при отсутствии сессий"""
+        self.assertIsNone(self.db.get_longest_session())
+        self.assertIsNone(self.db.get_best_day())
+        self.assertEqual(self.db.get_games_session_stats(), [])
+
+    def test_get_longest_session(self):
+        """Проверка возврата самой длинной сессии"""
+        s1 = self.db.start_session(self.game1_id)
+        self.db.end_session(s1, 1200)
+
+        s2 = self.db.start_session(self.game2_id)
+        self.db.end_session(s2, 3600)
+
+        longest = self.db.get_longest_session()
+        self.assertIsNotNone(longest)
+        self.assertEqual(longest["duration_seconds"], 3600)
+        self.assertEqual(longest["display_name"], "Game Two")
+
+    def test_get_best_day(self):
+        """Проверка возврата самого активного дня"""
+        s1 = self.db.start_session(self.game1_id)
+        self.db.end_session(s1, 1000)
+
+        s2 = self.db.start_session(self.game2_id)
+        self.db.end_session(s2, 2000)
+
+        best_day = self.db.get_best_day()
+        self.assertIsNotNone(best_day)
+        self.assertEqual(best_day["total"], 3000)
+        self.assertIsNotNone(best_day["day"])
+
+    def test_get_games_session_stats(self):
+        """Проверка возврата статистики сессий по играм"""
+        s1 = self.db.start_session(self.game1_id)
+        self.db.end_session(s1, 1000)
+        s2 = self.db.start_session(self.game1_id)
+        self.db.end_session(s2, 2000)
+
+        s3 = self.db.start_session(self.game2_id)
+        self.db.end_session(s3, 600)
+
+        stats = self.db.get_games_session_stats()
+        self.assertEqual(len(stats), 2)
+        # Отсортировано по avg_sec DESC: game1 (1500), game2 (600)
+        self.assertEqual(stats[0]["display_name"], "Game One")
+        self.assertEqual(stats[0]["session_count"], 2)
+        self.assertAlmostEqual(stats[0]["avg_sec"], 1500.0)
+
+        self.assertEqual(stats[1]["display_name"], "Game Two")
+        self.assertEqual(stats[1]["session_count"], 1)
+        self.assertAlmostEqual(stats[1]["avg_sec"], 600.0)
+
+
+class TestDatabaseThreadSafety(unittest.TestCase):
+    """Тесты на потокобезопасность класса Database"""
+
+    def setUp(self):
+        self.db = Database(":memory:")
+        self.game_id = self.db.add_game("test_thread.exe", "Thread Test Game")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_concurrent_read_write(self):
+        """Проверка одновременного чтения и записи из нескольких потоков"""
+        import threading
+
+        errors = []
+        iterations = 50
+
+        def writer_task():
+            try:
+                for i in range(iterations):
+                    sid = self.db.start_session(self.game_id)
+                    self.db.update_game_time(self.game_id, 10)
+                    self.db.end_session(sid, 10)
+                    self.db.set_setting(f"key_{threading.get_ident()}", str(i))
+            except Exception as e:
+                errors.append(e)
+
+        def reader_task():
+            try:
+                for _ in range(iterations):
+                    self.db.get_all_games()
+                    self.db.get_active_sessions()
+                    self.db.get_longest_session()
+                    self.db.get_best_day()
+                    self.db.get_games_session_stats()
+                    self.db.get_setting("autostart")
+            except Exception as e:
+                errors.append(e)
+
+        threads = []
+        for _ in range(4):
+            threads.append(threading.Thread(target=writer_task))
+            threads.append(threading.Thread(target=reader_task))
+
+        for t in threads:
+            t.start()
+
+        for t in threads:
+            t.join(timeout=10.0)
+            self.assertFalse(t.is_alive(), "Поток не завершился вовремя (возможен дедлок)")
+
+        self.assertEqual(len(errors), 0, f"Ошибки в потоках: {errors}")
+
+    def test_update_session_duration(self):
+        """Проверка промежуточного обновления длительности сессии (in-flight update)"""
+        sid = self.db.start_session(self.game_id)
+        # Проверяем, что сессия активна и duration_seconds = 0
+        active = self.db.get_active_sessions()
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0]['duration_seconds'], 0)
+        self.assertIsNone(active[0]['ended_at'])
+
+        # Обновляем промежуточную длительность
+        self.db.update_session_duration(sid, 120)
+        active = self.db.get_active_sessions()
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0]['duration_seconds'], 120)
+        self.assertIsNone(active[0]['ended_at'])
+
+    def test_cleanup_zombie_sessions_zero_duration(self):
+        """Проверка очистки зомби-сессий с нулевой длительностью"""
+        # Создаем активную сессию без завершения
+        sid = self.db.start_session(self.game_id)
+        active_before = self.db.get_active_sessions()
+        self.assertEqual(len(active_before), 1)
+
+        # Вызываем очистку зомби-сессий
+        cleaned = self.db.cleanup_zombie_sessions()
+        self.assertEqual(cleaned, 1)
+
+        # Проверяем, что активных сессий не осталось
+        active_after = self.db.get_active_sessions()
+        self.assertEqual(len(active_after), 0)
+
+        # Проверяем запись в таблице sessions
+        with self.db.lock:
+            cur = self.db.conn.cursor()
+            cur.execute("SELECT started_at, ended_at, duration_seconds FROM sessions WHERE id = ?", (sid,))
+            row = cur.fetchone()
+            self.assertEqual(row['started_at'], row['ended_at'])
+            self.assertEqual(row['duration_seconds'], 0)
+
+    def test_cleanup_zombie_sessions_flushed_duration(self):
+        """Проверка очистки зомби-сессий с частично сохранённой длительностью (>0)"""
+        # Создаем сессию и имитируем периодический сброс 180 секунд
+        sid = self.db.start_session(self.game_id)
+        self.db.update_session_duration(sid, 180)
+
+        cleaned = self.db.cleanup_zombie_sessions()
+        self.assertEqual(cleaned, 1)
+
+        with self.db.lock:
+            cur = self.db.conn.cursor()
+            cur.execute("SELECT started_at, ended_at, duration_seconds FROM sessions WHERE id = ?", (sid,))
+            row = cur.fetchone()
+            # Длительность должна сохраниться
+            self.assertEqual(row['duration_seconds'], 180)
+            self.assertIsNotNone(row['ended_at'])
+            self.assertNotEqual(row['started_at'], row['ended_at'])
+
+    def test_cleanup_zombie_sessions_on_init(self):
+        """Проверка автоматической очистки зомби-сессий при инициализации Database"""
+        temp_dir = tempfile.mkdtemp()
+        db_path = os.path.join(temp_dir, "zombie_test.db")
+        try:
+            # 1-й запуск приложения: сессия создана, но приложение аварийно закрыто
+            db1 = Database(db_path)
+            gid = db1.add_game("zombie.exe", "Zombie Game")
+            sid = db1.start_session(gid)
+            db1.update_session_duration(sid, 60)
+            db1.close()
+
+            # 2-й запуск приложения: при создании Database зомби-сессии должны очиститься
+            db2 = Database(db_path)
+            active = db2.get_active_sessions()
+            self.assertEqual(len(active), 0)
+
+            with db2.lock:
+                cur = db2.conn.cursor()
+                cur.execute("SELECT ended_at, duration_seconds FROM sessions WHERE id = ?", (sid,))
+                row = cur.fetchone()
+                self.assertIsNotNone(row['ended_at'])
+                self.assertEqual(row['duration_seconds'], 60)
+            db2.close()
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_backup_database(self):
+        """Проверка Online Backup API базы данных"""
+        temp_dir = tempfile.mkdtemp()
+        db_path = os.path.join(temp_dir, "original.db")
+        backup_path = os.path.join(temp_dir, "backup_sub", "backup.db")
+        try:
+            db = Database(db_path)
+            gid = db.add_game("game_backup.exe", "Game for Backup")
+            db.update_game_time(gid, 500)
+            db.set_setting("backup_test_key", "backup_value")
+
+            # Выполняем бэкап
+            db.backup_database(backup_path)
+
+            self.assertTrue(os.path.exists(backup_path))
+
+            # Проверяем целостность и данные файла бэкапа
+            backup_db = Database(backup_path)
+            games = backup_db.get_all_games()
+            self.assertEqual(len(games), 1)
+            self.assertEqual(games[0]['display_name'], "Game for Backup")
+            self.assertEqual(games[0]['total_seconds'], 500)
+            self.assertEqual(backup_db.get_setting("backup_test_key"), "backup_value")
+
+            backup_db.close()
+            db.close()
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_sessions_indexes(self):
+        """Проверка наличия индексов idx_sessions_started_at и idx_sessions_game_id и их использования в EXPLAIN QUERY PLAN"""
+        with self.db.lock:
+            cur = self.db.conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sessions'")
+            indexes = [row[0] for row in cur.fetchall()]
+            self.assertIn("idx_sessions_started_at", indexes)
+            self.assertIn("idx_sessions_game_id", indexes)
+
+            # Проверяем query plan для выборки по started_at
+            cur.execute("EXPLAIN QUERY PLAN SELECT * FROM sessions WHERE started_at BETWEEN ? AND ?", ("2026-01-01", "2026-01-02"))
+            plan_started_at = " ".join(row[3] for row in cur.fetchall())
+            self.assertIn("idx_sessions_started_at", plan_started_at)
+
+            # Проверяем query plan для выборки по game_id
+            cur.execute("EXPLAIN QUERY PLAN SELECT * FROM sessions WHERE game_id = ?", (1,))
+            plan_game_id = " ".join(row[3] for row in cur.fetchall())
+            self.assertIn("idx_sessions_game_id", plan_game_id)
+
+
 if __name__ == '__main__':
     unittest.main()
+
