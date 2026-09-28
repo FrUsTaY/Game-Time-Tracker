@@ -2,6 +2,7 @@ import unittest
 import os
 import sys
 import tempfile
+import shutil
 import sqlite3
 from datetime import date, datetime, timedelta
 
@@ -9,6 +10,7 @@ from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from database import Database
+
 
 
 class TestDatabaseGeneral(unittest.TestCase):
@@ -518,6 +520,43 @@ class TestDatabaseArchiveGame(unittest.TestCase):
 
         archived_games_final = self.db.get_all_games(archived=True)
         self.assertEqual(len(archived_games_final), 0)
+
+
+class TestDatabaseUnarchiveGame(unittest.TestCase):
+    def setUp(self):
+        """Создаем временную директорию и инициализируем базу данных для тестов"""
+        self.test_dir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.test_dir, "test_gametracker.db")
+        self.db = Database(self.db_path)
+
+    def tearDown(self):
+        """Закрываем базу данных и удаляем временные файлы после теста"""
+        self.db.close()
+        shutil.rmtree(self.test_dir)
+
+    def test_unarchive_game(self):
+        """Тест проверяет корректность работы метода unarchive_game"""
+        game_id = self.db.add_game(
+            exe_name="testgame.exe",
+            display_name="Test Game",
+            exe_path="C:\\games\\testgame.exe"
+        )
+
+        game = self.db.get_game_by_id(game_id)
+        self.assertEqual(game['is_archived'], 0)
+        self.assertIsNone(game['archived_at'])
+
+        self.db.archive_game(game_id)
+
+        archived_game = self.db.get_game_by_id(game_id)
+        self.assertEqual(archived_game['is_archived'], 1)
+        self.assertIsNotNone(archived_game['archived_at'])
+
+        self.db.unarchive_game(game_id)
+
+        unarchived_game = self.db.get_game_by_id(game_id)
+        self.assertEqual(unarchived_game['is_archived'], 0)
+        self.assertIsNone(unarchived_game['archived_at'])
 
 
 class TestDatabaseEndSessionAndDelete(unittest.TestCase):
