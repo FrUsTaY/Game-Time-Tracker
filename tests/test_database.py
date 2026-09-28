@@ -11,6 +11,39 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from database import Database
 
 
+class TestDatabaseIncrementLaunchCount(unittest.TestCase):
+    """Тесты для метода increment_launch_count"""
+
+    def setUp(self):
+        self.db = Database(db_path=":memory:")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_increment_launch_count(self):
+        """Тест увеличения счетчика запусков игры"""
+        game_id = self.db.add_game("test_game.exe", "Test Game")
+        game = self.db.get_game_by_id(game_id)
+        self.assertEqual(game['launch_count'], 0)
+
+        self.db.increment_launch_count(game_id)
+        game = self.db.get_game_by_id(game_id)
+        self.assertEqual(game['launch_count'], 1)
+
+        self.db.increment_launch_count(game_id)
+        game = self.db.get_game_by_id(game_id)
+        self.assertEqual(game['launch_count'], 2)
+
+    def test_increment_launch_count_nonexistent_game(self):
+        """Тест увеличения счетчика для несуществующей игры (не должно вызывать ошибку)"""
+        try:
+            self.db.increment_launch_count(999)
+            success = True
+        except Exception:
+            success = False
+
+        self.assertTrue(success)
+
 class TestDatabaseSessionsRange(unittest.TestCase):
     def setUp(self):
         # Используем in-memory базу данных для изоляции тестов
