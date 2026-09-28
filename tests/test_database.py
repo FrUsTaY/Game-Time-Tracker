@@ -11,6 +11,45 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from database import Database
 
 
+class TestDatabaseAddGame(unittest.TestCase):
+    def setUp(self):
+        self.fd, self.temp_db_path = tempfile.mkstemp(suffix='.db')
+        self.db = Database(db_path=self.temp_db_path)
+
+    def tearDown(self):
+        self.db.close()
+        os.close(self.fd)
+        if os.path.exists(self.temp_db_path):
+            os.remove(self.temp_db_path)
+
+    def test_add_game_success(self):
+        """Тест успешного добавления игры в базу данных"""
+        exe_name = "test_game.exe"
+        display_name = "Test Game"
+        exe_path = "C:/games/test_game.exe"
+
+        game_id = self.db.add_game(exe_name, display_name, exe_path)
+
+        self.assertIsNotNone(game_id)
+        self.assertGreater(game_id, 0)
+
+        game = self.db.get_game_by_id(game_id)
+
+        self.assertIsNotNone(game)
+        self.assertEqual(game['exe_name'], exe_name.lower())
+        self.assertEqual(game['display_name'], display_name)
+        self.assertEqual(game['exe_path'], exe_path)
+
+    def test_add_game_duplicate_exe(self):
+        """Тест попытки добавления игры с уже существующим exe_name (проверка UNIQUE constraint)"""
+        exe_name = "duplicate.exe"
+        self.db.add_game(exe_name, "First Game")
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.add_game(exe_name, "Second Game")
+
+
+
 class TestDatabaseGetGameById(unittest.TestCase):
     def setUp(self):
         """Инициализируем in-memory базу данных перед каждым тестом"""

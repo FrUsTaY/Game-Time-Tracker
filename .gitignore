@@ -1,9 +1,8 @@
 tests/__pycache__
 *.pyc
 __pycache__/
-*.pyc
 *.py[cod]
 *$py.class
+*.class
 .pytest_cache/
 .coverage
-*.class
