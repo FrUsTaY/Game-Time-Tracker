@@ -11,6 +11,46 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from database import Database
 
 
+class TestDatabaseGetGameById(unittest.TestCase):
+    def setUp(self):
+        """Инициализируем in-memory базу данных перед каждым тестом"""
+        self.db = Database(":memory:")
+
+    def tearDown(self):
+        """Закрываем соединение с базой данных после каждого теста"""
+        self.db.close()
+
+    def test_get_existing_game_by_id(self):
+        """Тест успешного получения существующей игры по ID"""
+        exe_name = "test_game.exe"
+        display_name = "Test Game"
+        exe_path = "C:\\Games\\test_game.exe"
+        game_id = self.db.add_game(exe_name, display_name, exe_path)
+
+        game = self.db.get_game_by_id(game_id)
+        self.assertIsNotNone(game)
+        self.assertEqual(game["id"], game_id)
+        self.assertEqual(game["exe_name"], exe_name.lower())
+        self.assertEqual(game["display_name"], display_name)
+        self.assertEqual(game["exe_path"], exe_path)
+
+    def test_get_non_existent_game_by_id(self):
+        """Тест получения игры по несуществующему ID"""
+        game = self.db.get_game_by_id(999)
+        self.assertIsNone(game)
+
+    def test_get_game_by_id_invalid_type(self):
+        """Тест получения игры с передачей некорректного типа ID"""
+        game = self.db.get_game_by_id("invalid")
+        self.assertIsNone(game)
+
+        game_id = self.db.add_game("test2.exe", "Test 2", None)
+        game_str = self.db.get_game_by_id(str(game_id))
+        self.assertIsNotNone(game_str)
+        self.assertEqual(game_str["id"], game_id)
+
+
+
 class TestDatabaseIncrementLaunchCount(unittest.TestCase):
     """Тесты для метода increment_launch_count"""
 
