@@ -79,7 +79,7 @@ class TestAppSettings(unittest.TestCase):
 
         mock_winreg.OpenKey.assert_called_once()
         mock_winreg.SetValueEx.assert_called_once_with(
-            mock_key, "GameTimeTracker", 0, mock_winreg.REG_SZ, 'C:\\path\\to\\app.exe'
+            mock_key, "GameTimeTracker", 0, mock_winreg.REG_SZ, '"C:\\path\\to\\app.exe"'
         )
         mock_winreg.CloseKey.assert_called_once_with(mock_key)
         self.mock_db.set_setting.assert_called_with('autostart', 'true')
