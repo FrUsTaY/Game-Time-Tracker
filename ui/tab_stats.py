@@ -140,22 +140,31 @@ class TabStats(ctk.CTkFrame):
         active_count = len(games)
         archived_count = len(archived_games)
 
-        total_seconds = sum(g['total_seconds'] for g in games)
+        all_games = games + archived_games
+        total_seconds = sum((g.get('total_seconds') or 0) for g in all_games)
         total_hours = total_seconds / 3600
-        self.card_total_hours.value_label.configure(text=f"{total_hours:.1f} ч")
+        archived_seconds = sum((g.get('total_seconds') or 0) for g in archived_games)
+        archived_hours = archived_seconds / 3600
+
+        if archived_seconds > 0:
+            self.card_total_hours.value_label.configure(text=f"{total_hours:.1f} ч\n(в архиве: {archived_hours:.1f} ч)")
+        else:
+            self.card_total_hours.value_label.configure(text=f"{total_hours:.1f} ч")
 
         longest = self.db.get_longest_session()
-        if longest and longest.get('duration_seconds') and longest['duration_seconds'] > 0:
-            hours = longest['duration_seconds'] / 3600
-            game_name = longest['display_name']
+        longest_dur = (longest.get('duration_seconds') or 0) if longest else 0
+        if longest and longest_dur > 0:
+            hours = longest_dur / 3600
+            game_name = longest.get('display_name', '')
             date_str = longest['started_at'][:10] if longest.get('started_at') else "—"
             self.card_longest_session.value_label.configure(text=f"{game_name}\n{hours:.1f} ч ({date_str})")
         else:
             self.card_longest_session.value_label.configure(text="Нет данных")
 
         best_day = self.db.get_best_day()
-        if best_day and best_day.get('total') and best_day['total'] > 0:
-            hours = best_day['total'] / 3600
+        best_total = (best_day.get('total') or 0) if best_day else 0
+        if best_day and best_total > 0:
+            hours = best_total / 3600
             self.card_best_day.value_label.configure(text=f"{best_day['day']}\n{hours:.1f} ч")
         else:
             self.card_best_day.value_label.configure(text="Нет данных")
@@ -164,7 +173,9 @@ class TabStats(ctk.CTkFrame):
 
     def _update_top_games(self, top_n: int = 5):
         games = self.db.get_all_games(archived=False)
-        games_sorted = sorted(games, key=lambda x: x['total_seconds'], reverse=True)[:top_n]
+        archived_games = self.db.get_all_games(archived=True)
+        all_games = games + archived_games
+        games_sorted = sorted(all_games, key=lambda x: x.get('total_seconds') or 0, reverse=True)[:top_n]
         if not games_sorted:
             if self.top_fig is not None:
                 self.top_fig.clear()
@@ -177,8 +188,8 @@ class TabStats(ctk.CTkFrame):
             label.pack(pady=20)
             return
 
-        names = [g['display_name'] for g in games_sorted]
-        hours = [g['total_seconds'] / 3600 for g in games_sorted]
+        names = [f"{g['display_name']} (в архиве)" if g.get('is_archived') else g['display_name'] for g in games_sorted]
+        hours = [(g.get('total_seconds') or 0) / 3600 for g in games_sorted]
 
         if self.top_fig is None or self.top_canvas is None:
             for widget in self.top_frame.winfo_children():
@@ -209,7 +220,7 @@ class TabStats(ctk.CTkFrame):
         daily_seconds = {}
         for sess in sessions:
             sess_date = datetime.fromisoformat(sess['started_at']).date()
-            duration = sess.get('duration_seconds', 0)
+            duration = sess.get('duration_seconds') or 0
             if duration > 0:
                 daily_seconds[sess_date] = daily_seconds.get(sess_date, 0) + duration
 

@@ -43,6 +43,7 @@ class TestAudit2Task5Notifications(unittest.TestCase):
         mock_proc.info = {'pid': 9999, 'name': 'SuperNewGame.exe', 'exe': 'C:\\Games\\SuperNewGame.exe'}
 
         with patch('psutil.process_iter', return_value=[mock_proc]), \
+             patch.object(self.tracker, '_has_visible_window', return_value=True), \
              patch.object(self.tracker, '_get_active_window_pid', return_value=None):
             self.tracker._check_processes()
 
@@ -59,6 +60,7 @@ class TestAudit2Task5Notifications(unittest.TestCase):
         mock_proc.info = {'pid': 9999, 'name': 'SuperNewGame.exe', 'exe': 'C:\\Games\\SuperNewGame.exe'}
 
         with patch('psutil.process_iter', return_value=[mock_proc]), \
+             patch.object(self.tracker, '_has_visible_window', return_value=True), \
              patch.object(self.tracker, '_get_active_window_pid', return_value=None):
             self.tracker._check_processes()
 
@@ -74,6 +76,7 @@ class TestAudit2Task5Notifications(unittest.TestCase):
         mock_proc.info = {'pid': 8888, 'name': 'existinggame.exe', 'exe': 'C:\\Games\\existinggame.exe'}
 
         with patch('psutil.process_iter', return_value=[mock_proc]), \
+             patch.object(self.tracker, '_has_visible_window', return_value=True), \
              patch.object(self.tracker, '_get_active_window_pid', return_value=None):
             self.tracker._check_processes()
 
@@ -88,6 +91,7 @@ class TestAudit2Task5Notifications(unittest.TestCase):
         mock_proc.info = {'pid': 9999, 'name': 'AnotherNewGame.exe', 'exe': 'C:\\Games\\AnotherNewGame.exe'}
 
         with patch('psutil.process_iter', return_value=[mock_proc]), \
+             patch.object(self.tracker, '_has_visible_window', return_value=True), \
              patch.object(self.tracker, '_get_active_window_pid', return_value=None):
             # Первый тик — обнаружение
             self.tracker._check_processes()
@@ -210,9 +214,9 @@ class TestAudit2Task6SpecAndVersion(unittest.TestCase):
         self.assertNotIn("C:\\Users", content)
 
     def test_tab_about_version_constant_and_check_updates(self):
-        """TabAbout использует константу актуальной версии v1.1.1 в UI и диалоге обновлений"""
-        self.assertEqual(APP_VERSION, "v1.1.1")
-        self.assertEqual(TabAbout.APP_VERSION, "v1.1.1")
+        """TabAbout использует константу актуальной версии v1.1.2 в UI и диалоге обновлений"""
+        self.assertEqual(APP_VERSION, "v1.1.2")
+        self.assertEqual(TabAbout.APP_VERSION, "v1.1.2")
 
         tab = TabAbout.__new__(TabAbout)
         with patch('tkinter.messagebox.showinfo') as mock_info:
@@ -220,7 +224,7 @@ class TestAudit2Task6SpecAndVersion(unittest.TestCase):
             mock_info.assert_called_once()
             title, msg = mock_info.call_args[0]
             self.assertEqual(title, "Проверка обновлений")
-            self.assertIn("v1.1.1", msg)
+            self.assertIn("v1.1.2", msg)
             self.assertNotIn("v1.0.0", msg)
 
 

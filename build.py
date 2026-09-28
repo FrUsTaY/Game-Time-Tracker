@@ -15,11 +15,6 @@ def clean_build():
         if os.path.exists(dir_name):
             shutil.rmtree(dir_name)
             print(f"Удалена папка {dir_name}")
-    # Удаляем файл .spec
-    spec_file = "GameTimeTracker.spec"
-    if os.path.exists(spec_file):
-        os.remove(spec_file)
-        print(f"Удалён {spec_file}")
 
 def run_pyinstaller():
     """Запускает PyInstaller с нужными параметрами."""

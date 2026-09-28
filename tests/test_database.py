@@ -1,4 +1,14 @@
+import os
+import sys
+import tempfile
+import shutil
+import sqlite3
 import unittest
+from datetime import date, datetime, timedelta
+
+# Добавляем родительскую директорию в sys.path для импорта database
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from database import Database
 
 class TestDatabase(unittest.TestCase):
@@ -43,20 +53,6 @@ class TestDatabase(unittest.TestCase):
         # Проверяем, что активных сессий снова нет
         active_sessions = self.db.get_active_sessions()
         self.assertEqual(len(active_sessions), 0)
-
-if __name__ == '__main__':
-    unittest.main()
-import os
-import sys
-import tempfile
-import shutil
-import sqlite3
-from datetime import date, datetime, timedelta
-
-# Добавляем родительскую директорию в sys.path для импорта database
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from database import Database
 
 
 class TestDatabaseGetGameByExeName(unittest.TestCase):

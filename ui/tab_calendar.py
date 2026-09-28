@@ -147,7 +147,7 @@ class TabCalendar(ctk.CTkFrame):
         for sess in sessions:
             sess_date_str = sess['started_at'][:10]
             sess_date = datetime.fromisoformat(sess_date_str).date()
-            duration = sess.get('duration_seconds', 0)
+            duration = sess.get('duration_seconds') or 0
             if duration <= 0:
                 continue
             if sess_date not in self.sessions_cache:

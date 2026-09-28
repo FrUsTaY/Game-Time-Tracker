@@ -9,7 +9,7 @@ import tkinter.messagebox as messagebox
 from utils import get_base_dir, resource_path
 
 
-APP_VERSION = "v1.1.1"
+APP_VERSION = "v1.1.2"
 
 
 class TabAbout(ctk.CTkFrame):

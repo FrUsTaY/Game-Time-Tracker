@@ -44,7 +44,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.vars["autostart"] = ctk.BooleanVar()
         autostart_switch = ctk.CTkSwitch(
             main_frame, text="Запускать вместе с Windows",
-            variable=self.vars["autostart"], command=self._on_autostart_toggle,
+            variable=self.vars["autostart"],
             text_color="#e0e0e0"
         )
         autostart_switch.pack(anchor="w", padx=20, pady=(0, 10))
@@ -181,12 +181,13 @@ class SettingsWindow(ctk.CTkToplevel):
             self.minutes_entry.configure(state="disabled")
 
     def _on_autostart_toggle(self):
-        if self.vars["autostart"].get():
-            self.settings.enable_autostart()
-        else:
-            self.settings.disable_autostart()
+        """Раньше применял настройку мгновенно, теперь сохранение происходит только в save_and_close()."""
+        pass
 
     def save_and_close(self):
+        autostart_val = self.vars["autostart"].get()
+        if autostart_val != self.settings.autostart:
+            self.settings.autostart = autostart_val
         self.settings.minimize_to_tray_on_start = self.vars["minimize_to_tray_on_start"].get()
         self.settings.track_only_active_window = self.vars["track_only_active_window"].get()
         self.settings.notify_new_game = self.vars["notify_new_game"].get()

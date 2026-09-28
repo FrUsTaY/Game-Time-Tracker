@@ -308,7 +308,6 @@ class TabGames(ctk.CTkFrame):
     def update_tick(self, game_id: int, total_seconds: int, is_active: bool = None):
         # Проверяем, существует ли карточка и не уничтожена ли она
         if game_id not in self.cards:
-            print(f"DEBUG: game_id {game_id} не найден в cards, пропускаем обновление")
             return
         card = self.cards[game_id]
         # Проверяем, что виджет info_label существует (не уничтожен)
@@ -329,9 +328,9 @@ class TabGames(ctk.CTkFrame):
                     delattr(card, '_session_launched_updated')
             else:
                 # Карточка уничтожена, но не удаляем из словаря – при следующем refresh_games() она пересоздастся
-                print(f"DEBUG: карточка game_id {game_id} уничтожена, но оставлена в cards для пересоздания")
-        except Exception as e:
-            print(f"DEBUG: ошибка обновления карточки {game_id}: {e}")
+                pass
+        except Exception:
+            pass
 
     def filter_games(self):
         search_text = self.search_var.get().strip().lower()
@@ -363,14 +362,20 @@ class TabGames(ctk.CTkFrame):
         dialog.wait_window()
 
     def _add_games_from_processes(self, processes: List[dict]):
+        added_count = 0
         for proc in processes:
             exe_path = proc.get('exe')
             if not exe_path:
                 exe_name = proc['name']
                 display_name = exe_name.replace('.exe', '').title()
-                self._add_game_by_name(exe_name, display_name, None)
+                if self._add_game_by_name(exe_name, display_name, None, silent=True, refresh=False):
+                    added_count += 1
             else:
-                self._add_game(exe_path)
+                if self._add_game(exe_path, silent=True, refresh=False):
+                    added_count += 1
+        self.refresh_games()
+        self._refresh_archive_tab()
+        messagebox.showinfo("Пакетное добавление", f"Добавлено игр: {added_count}")
 
     def add_game_manual(self):
         dialog = ctk.CTkToplevel(self)
@@ -391,40 +396,50 @@ class TabGames(ctk.CTkFrame):
             if not exe_name:
                 messagebox.showerror("Ошибка", "Введите имя исполняемого файла")
                 return
+            if not exe_name.lower().endswith('.exe'):
+                exe_name += '.exe'
             display_name = name_entry.get().strip()
             if not display_name:
-                display_name = exe_name.replace('.exe', '').title()
+                display_name = os.path.splitext(exe_name)[0].title()
             self._add_game_by_name(exe_name, display_name, None)
             dialog.destroy()
 
         ctk.CTkButton(dialog, text="Добавить", command=confirm, fg_color="#00d4ff").pack(pady=10)
 
-    def _add_game(self, exe_path: str):
+    def _add_game(self, exe_path: str, silent: bool = False, refresh: bool = True) -> bool:
         exe_name = os.path.basename(exe_path)
         display_name = os.path.splitext(exe_name)[0].title()
         existing = self.db.get_game_by_exe_name(exe_name)
         if existing:
-            messagebox.showinfo("Информация", f"Игра {existing['display_name']} уже есть в списке.")
-            return
+            if not silent:
+                messagebox.showinfo("Информация", f"Игра {existing['display_name']} уже есть в списке.")
+            return False
         game_id = self.db.add_game(exe_name, display_name, exe_path)
         icon = self.tracker.get_exe_icon(exe_path)
         if icon:
             icon_path = os.path.join(self.icons_dir, f"{game_id}.png")
             icon.save(icon_path, "PNG")
             self.db.update_icon_path(game_id, icon_path)
-        messagebox.showinfo("Успех", f"Игра {display_name} добавлена!")
-        self.refresh_games()
-        self._refresh_archive_tab()
+        if not silent:
+            messagebox.showinfo("Успех", f"Игра {display_name} добавлена!")
+        if refresh:
+            self.refresh_games()
+            self._refresh_archive_tab()
+        return True
 
-    def _add_game_by_name(self, exe_name: str, display_name: str, exe_path: Optional[str]):
+    def _add_game_by_name(self, exe_name: str, display_name: str, exe_path: Optional[str], silent: bool = False, refresh: bool = True) -> bool:
         existing = self.db.get_game_by_exe_name(exe_name)
         if existing:
-            messagebox.showinfo("Информация", f"Игра {existing['display_name']} уже есть в списке.")
-            return
+            if not silent:
+                messagebox.showinfo("Информация", f"Игра {existing['display_name']} уже есть в списке.")
+            return False
         self.db.add_game(exe_name, display_name, exe_path)
-        messagebox.showinfo("Успех", f"Игра {display_name} добавлена!")
-        self.refresh_games()
-        self._refresh_archive_tab()
+        if not silent:
+            messagebox.showinfo("Успех", f"Игра {display_name} добавлена!")
+        if refresh:
+            self.refresh_games()
+            self._refresh_archive_tab()
+        return True
 
     def refresh(self):
         self.refresh_games()

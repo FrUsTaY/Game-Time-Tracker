@@ -19,6 +19,46 @@ from PIL import Image
 from database import Database
 from settings import AppSettings
 
+# Общеизвестные системные процессы и консольные утилиты Windows
+SYSTEM_EXCLUDE_EXES = {
+    # Системные оболочки, менеджеры и терминалы
+    'explorer.exe', 'taskmgr.exe', 'cmd.exe', 'powershell.exe', 'pwsh.exe',
+    'conhost.exe', 'wt.exe', 'bash.exe', 'wsl.exe',
+    # Системные службы и фоновые процессы Windows
+    'svchost.exe', 'dwm.exe', 'csrss.exe', 'smss.exe', 'lsass.exe', 'services.exe',
+    'wininit.exe', 'winlogon.exe', 'sihost.exe', 'fontdrvhost.exe', 'ctfmon.exe',
+    'searchhost.exe', 'searchindexer.exe', 'searchfilterhost.exe', 'searchprotocolhost.exe',
+    'startmenuexperiencehost.exe', 'shellexperiencehost.exe', 'textinputhost.exe',
+    'applicationframehost.exe', 'runtimebroker.exe', 'lockapp.exe', 'systemsettings.exe',
+    'regedit.exe', 'smartscreen.exe', 'securityhealthsystray.exe', 'securityhealthservice.exe',
+    'spoolsv.exe', 'audiodg.exe', 'wlanext.exe', 'dashost.exe',
+    # Утилиты разработки и общие консольные инструменты
+    'git.exe', 'python.exe', 'pythonw.exe'
+}
+
+
+def is_system_process(exe_name: str, exe_path: Optional[str] = None) -> bool:
+    """
+    Проверяет, является ли процесс системной утилитой Windows или фоновой службой.
+    Исключаются как известные системные имена, так и файлы из папок Windows (System32, SysWOW64 и др.).
+    """
+    if not exe_name:
+        return False
+    name_lower = exe_name.lower()
+    if name_lower in SYSTEM_EXCLUDE_EXES:
+        return True
+
+    if exe_path:
+        path_lower = os.path.normpath(exe_path).lower()
+        system_root = os.environ.get("SystemRoot", "C:\\Windows").lower()
+        windir = os.environ.get("windir", "C:\\Windows").lower()
+        if path_lower.startswith(system_root) or path_lower.startswith(windir) or path_lower.startswith("c:\\windows"):
+            return True
+        if "\\system32\\" in path_lower or "\\syswow64\\" in path_lower or "\\winsxs\\" in path_lower:
+            return True
+
+    return False
+
 
 class GameTracker:
     def __init__(
@@ -46,6 +86,7 @@ class GameTracker:
         # Множества для отслеживания запущенных процессов (.exe) и предотвращения спама уведомлениями
         self._seen_exes: set = set()
         self._notified_new_exes: set = set()
+        self._unwindowed_attempts: Dict[str, int] = {}
 
     def notify(self, title: str, message: str) -> None:
         """Отправка системного уведомления через tray или колбэк"""
@@ -100,6 +141,33 @@ class GameTracker:
             sleep_time = max(0.1, 1.0 - elapsed)
             time.sleep(sleep_time)
 
+    def _get_visible_window_pids(self) -> set:
+        """Возвращает множество PID процессов, имеющих хотя бы одно видимое окно верхнего уровня"""
+        visible_pids = set()
+        try:
+            def enum_cb(hwnd, _):
+                try:
+                    if win32gui.IsWindowVisible(hwnd):
+                        rect = win32gui.GetWindowRect(hwnd)
+                        if (rect[2] - rect[0] > 0) and (rect[3] - rect[1] > 0):
+                            _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
+                            visible_pids.add(found_pid)
+                except Exception:
+                    pass
+                return True
+
+            win32gui.EnumWindows(enum_cb, None)
+        except Exception:
+            pass
+        return visible_pids
+
+    def _has_visible_window(self, pids: List[int], visible_pids: Optional[set] = None) -> bool:
+        """Проверяет, есть ли среди переданных PID видимое окно верхнего уровня"""
+        if visible_pids is not None:
+            return any(pid in visible_pids for pid in pids)
+        cur_visible = self._get_visible_window_pids()
+        return any(pid in cur_visible for pid in pids)
+
     def _check_processes(self) -> None:
         # Получаем все активные игры из БД
         games = self.db.get_all_games(archived=False)
@@ -124,24 +192,47 @@ class GameTracker:
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
 
-        # Обнаружение новых запущенных процессов (.exe), которых ещё нет в библиотеке
-        new_running_exes = []
-        for exe_name in running_processes.keys():
-            if exe_name not in self._seen_exes:
-                self._seen_exes.add(exe_name)
-                new_running_exes.append(exe_name)
+        # Получаем множество PID процессов с видимыми окнами
+        visible_window_pids = self._get_visible_window_pids()
 
-        if self.settings.notify_new_game and new_running_exes:
+        # Обнаружение новых запущенных процессов (.exe), которых ещё нет в библиотеке
+        if self.settings.notify_new_game:
             try:
                 all_games = self.db.get_all_games(archived=False) + self.db.get_all_games(archived=True)
                 library_exes = {g['exe_name'].lower() for g in all_games}
             except Exception:
                 library_exes = set(games_by_exe.keys())
 
-            for exe_name in new_running_exes:
-                if exe_name not in library_exes and exe_name not in self._notified_new_exes:
-                    self._notified_new_exes.add(exe_name)
-                    self.notify("GameTimeTracker", f"Обнаружена новая игра: {exe_name}")
+            for exe_name, proc_data in running_processes.items():
+                if exe_name in self._seen_exes:
+                    continue
+
+                # Игнорируем процессы, которые уже есть в библиотеке
+                if exe_name in library_exes:
+                    self._seen_exes.add(exe_name)
+                    continue
+
+                # Игнорируем системные процессы и файлы из системных каталогов
+                if is_system_process(exe_name, proc_data.get('exe_path')):
+                    self._seen_exes.add(exe_name)
+                    continue
+
+                # Отправляем уведомление только для процессов с видимым окном верхнего уровня
+                pids = proc_data.get('pids', [])
+                if self._has_visible_window(pids, visible_window_pids):
+                    self._seen_exes.add(exe_name)
+                    if exe_name not in self._notified_new_exes:
+                        self._notified_new_exes.add(exe_name)
+                        self.notify("GameTimeTracker", f"Обнаружена новая игра: {exe_name}")
+                else:
+                    # Фоновый процесс без окна (или окно ещё не создано)
+                    attempts = self._unwindowed_attempts.get(exe_name, 0) + 1
+                    self._unwindowed_attempts[exe_name] = attempts
+                    if attempts >= 10:
+                        self._seen_exes.add(exe_name)
+        else:
+            for exe_name in running_processes.keys():
+                self._seen_exes.add(exe_name)
 
         # Игры, которые сейчас запущены (выбираем процесс с окном, если есть)
         tracked_games = {}
@@ -153,23 +244,8 @@ class GameTracker:
 
             # Выбираем PID, у которого есть видимое окно
             selected_pid = None
-            selected_exe_path = None
             for pid in pids:
-                has_window = False
-                try:
-                    def enum_cb(hwnd, hwnds):
-                        if win32gui.IsWindowVisible(hwnd):
-                            _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
-                            if found_pid == pid:
-                                hwnds.append(hwnd)
-                        return True
-                    hwnds = []
-                    win32gui.EnumWindows(enum_cb, hwnds)
-                    if hwnds:
-                        has_window = True
-                except:
-                    pass
-                if has_window:
+                if pid in visible_window_pids:
                     selected_pid = pid
                     break
             if selected_pid is None and pids:

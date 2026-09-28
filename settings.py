@@ -18,11 +18,16 @@ class AppSettings:
         self._cache = {}  # Простой кеш на время жизни объекта
 
     def _get_bool(self, key: str, default: bool) -> bool:
-        """Получить булево значение из БД"""
+        """Получить булево значение из БД (с кэшированием)"""
+        if key in self._cache:
+            return self._cache[key]
         val = self.db.get_setting(key)
         if val is None:
+            self._cache[key] = default
             return default
-        return val.lower() == 'true'
+        res = val.lower() == 'true'
+        self._cache[key] = res
+        return res
 
     def _set_bool(self, key: str, value: bool) -> None:
         """Сохранить булево значение в БД"""
@@ -30,13 +35,19 @@ class AppSettings:
         self._cache[key] = value
 
     def _get_int(self, key: str, default: int) -> int:
-        """Получить целочисленное значение из БД"""
+        """Получить целочисленное значение из БД (с кэшированием)"""
+        if key in self._cache:
+            return self._cache[key]
         val = self.db.get_setting(key)
         if val is None:
+            self._cache[key] = default
             return default
         try:
-            return int(val)
+            res = int(val)
+            self._cache[key] = res
+            return res
         except ValueError:
+            self._cache[key] = default
             return default
 
     def _set_int(self, key: str, value: int) -> None:
