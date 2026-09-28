@@ -17,6 +17,104 @@ from settings import AppSettings
 from utils import get_base_dir
 
 
+class AddNewGameDialog(ctk.CTkToplevel):
+    """Модальное окно при обнаружении новой игры."""
+    def __init__(self, parent, exe_name: str, exe_path: Optional[str], tracker, on_confirm, on_ignore=None):
+        super().__init__(parent)
+        self.exe_name = exe_name
+        self.exe_path = exe_path
+        self.tracker = tracker
+        self.on_confirm = on_confirm
+        self.on_ignore = on_ignore
+
+        self.title("🎮 Обнаружена новая игра!")
+        self.geometry("500x320")
+        self.resizable(False, False)
+        self.grab_set()
+
+        # Центрирование окна
+        self.withdraw()
+        self.update_idletasks()
+        try:
+            x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
+            y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
+            self.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+        self.deiconify()
+        self.focus_force()
+
+        self._build_ui()
+
+    def _build_ui(self):
+        container = ctk.CTkFrame(self, fg_color="transparent")
+        container.pack(fill="both", expand=True, padx=20, pady=20)
+
+        title_lbl = ctk.CTkLabel(
+            container, text="🎮 Обнаружен запуск новой игры!",
+            font=("Segoe UI", 16, "bold"), text_color="#00d4ff"
+        )
+        title_lbl.pack(pady=(0, 5))
+
+        sub_lbl = ctk.CTkLabel(
+            container, text="Добавить её в библиотеку для отслеживания времени?",
+            font=("Segoe UI", 12), text_color="#888888"
+        )
+        sub_lbl.pack(pady=(0, 15))
+
+        # Поле exe
+        exe_frame = ctk.CTkFrame(container, fg_color="transparent")
+        exe_frame.pack(fill="x", pady=5)
+        ctk.CTkLabel(exe_frame, text="Файл:", width=80, anchor="w", text_color="#e0e0e0").pack(side="left")
+        exe_entry = ctk.CTkEntry(exe_frame)
+        exe_entry.insert(0, self.exe_name)
+        exe_entry.configure(state="disabled")
+        exe_entry.pack(side="left", fill="x", expand=True)
+
+        # Поле красивого имени
+        name_frame = ctk.CTkFrame(container, fg_color="transparent")
+        name_frame.pack(fill="x", pady=5)
+        ctk.CTkLabel(name_frame, text="Название:", width=80, anchor="w", text_color="#e0e0e0").pack(side="left")
+        clean_name = os.path.splitext(self.exe_name)[0].replace('_', ' ').replace('-', ' ').title()
+        self.name_entry = ctk.CTkEntry(name_frame)
+        self.name_entry.insert(0, clean_name)
+        self.name_entry.pack(side="left", fill="x", expand=True)
+        self.name_entry.focus()
+        self.name_entry.bind("<Return>", lambda e: self._confirm())
+
+        # Кнопки
+        btn_frame = ctk.CTkFrame(container, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=(20, 0))
+
+        add_btn = ctk.CTkButton(
+            btn_frame, text="✅ Добавить в трекер",
+            command=self._confirm, fg_color="#00d4ff", hover_color="#0099cc",
+            text_color="#0d0d0d", font=("Segoe UI", 12, "bold"), height=36
+        )
+        add_btn.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+        ignore_btn = ctk.CTkButton(
+            btn_frame, text="❌ Не отслеживать",
+            command=self._ignore, fg_color="#333333", hover_color="#555555",
+            text_color="#ffffff", height=36, width=140
+        )
+        ignore_btn.pack(side="right")
+
+    def _confirm(self):
+        display_name = self.name_entry.get().strip()
+        if not display_name:
+            display_name = os.path.splitext(self.exe_name)[0].title()
+        self.on_confirm(self.exe_name, display_name, self.exe_path)
+        self.destroy()
+
+    def _ignore(self):
+        if self.tracker and hasattr(self.tracker, 'ignore_exe'):
+            self.tracker.ignore_exe(self.exe_name)
+        if self.on_ignore:
+            self.on_ignore(self.exe_name)
+        self.destroy()
+
+
 class AddFromProcessesDialog(ctk.CTkToplevel):
     """Модальное окно для выбора процесса из запущенных с поиском."""
 
@@ -25,6 +123,7 @@ class AddFromProcessesDialog(ctk.CTkToplevel):
         self.tracker = tracker
         self.on_add = on_add
         self.selected_processes = []
+        self.selected_pids = set()
         self.all_processes = []   # список всех процессов
         self.filtered_processes = []
         self.check_vars = {}
@@ -33,13 +132,22 @@ class AddFromProcessesDialog(ctk.CTkToplevel):
         self.geometry("750x550")
         self.grab_set()
 
-        # Поле поиска
+        # Поле поиска и переключатель фоновых процессов
         search_frame = ctk.CTkFrame(self, fg_color="transparent")
         search_frame.pack(fill="x", padx=10, pady=5)
         ctk.CTkLabel(search_frame, text="Поиск:", text_color="#e0e0e0").pack(side="left", padx=5)
         self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="фильтр по имени или заголовку")
         self.search_entry.pack(side="left", fill="x", expand=True, padx=5)
-        self.search_entry.bind("<KeyRelease>", self.filter_processes)
+        self._search_timer = None
+        self.search_entry.bind("<KeyRelease>", self._on_search_key)
+
+        self.show_background_var = ctk.BooleanVar(value=False)
+        self.bg_checkbox = ctk.CTkCheckBox(
+            search_frame, text="Показать фоновые процессы",
+            variable=self.show_background_var, command=self.filter_processes,
+            font=("Segoe UI", 11), text_color="#aaaaaa", width=190
+        )
+        self.bg_checkbox.pack(side="right", padx=5)
 
         # Список процессов с прокруткой
         self.frame = ctk.CTkScrollableFrame(self, height=400)
@@ -65,40 +173,63 @@ class AddFromProcessesDialog(ctk.CTkToplevel):
 
         self.load_processes()
 
+    def _on_search_key(self, event=None):
+        if self._search_timer:
+            self.after_cancel(self._search_timer)
+        self._search_timer = self.after(100, self.filter_processes)
+
     def load_processes(self):
+        from tracker import is_system_process
+
         processes = self.tracker.get_running_processes()
-        # Собираем заголовки окон для каждого PID
+        # Собираем заголовки окон для всех PID за один быстрый проход EnumWindows
+        pid_to_title = {}
+        try:
+            def enum_cb(hwnd, _):
+                if win32gui.IsWindowVisible(hwnd):
+                    _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
+                    title = win32gui.GetWindowText(hwnd).strip()
+                    if title and found_pid not in pid_to_title:
+                        pid_to_title[found_pid] = title
+                return True
+            win32gui.EnumWindows(enum_cb, None)
+        except Exception:
+            pass
+
         self.all_processes = []
         for proc in processes:
             try:
-                pid = proc['pid']
-                # Получаем список окон этого процесса
-                def enum_cb(hwnd, hwnds):
-                    if win32gui.IsWindowVisible(hwnd):
-                        _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
-                        if found_pid == pid:
-                            title = win32gui.GetWindowText(hwnd)
-                            if title:
-                                hwnds.append(title)
-                    return True
-                hwnds = []
-                win32gui.EnumWindows(enum_cb, hwnds)
-                window_title = hwnds[0] if hwnds else ""
+                pid = proc.get('pid')
+                proc_name = proc.get('name', '')
+                window_title = pid_to_title.get(pid, '')
                 proc['window_title'] = window_title
+                proc['is_system'] = is_system_process(proc_name, proc.get('exe'))
                 self.all_processes.append(proc)
             except Exception:
                 continue
-        self.all_processes.sort(key=lambda x: x['name'])
-        self.filtered_processes = self.all_processes.copy()
-        self._refresh_list()
+
+        self.all_processes.sort(key=lambda x: (not bool(x.get('window_title')), x['name'].lower()))
+        self.filter_processes()
 
     def filter_processes(self, event=None):
+        self._search_timer = None
         text = self.search_entry.get().strip().lower()
-        if not text:
-            self.filtered_processes = self.all_processes.copy()
-        else:
-            self.filtered_processes = [p for p in self.all_processes 
-                                       if text in p['name'].lower() or text in p.get('window_title', '').lower()]
+        show_all = self.show_background_var.get()
+
+        filtered = []
+        for p in self.all_processes:
+            has_window = bool(p.get('window_title'))
+            is_sys = p.get('is_system', False)
+
+            # По умолчанию скрываем системные процессы и процессы без видимого окна
+            if not show_all and (is_sys or not has_window):
+                if p['pid'] not in self.selected_pids:
+                    continue
+
+            if not text or text in p['name'].lower() or text in p.get('window_title', '').lower():
+                filtered.append(p)
+
+        self.filtered_processes = filtered
         self._refresh_list()
 
     def _refresh_list(self):
@@ -107,12 +238,18 @@ class AddFromProcessesDialog(ctk.CTkToplevel):
             widget.destroy()
         self.check_vars = {}
         for idx, proc in enumerate(self.filtered_processes):
-            var = ctk.BooleanVar()
+            pid = proc['pid']
+            var = ctk.BooleanVar(value=(pid in self.selected_pids))
+
+            def _make_cmd(p_pid, p_var):
+                return lambda: self.selected_pids.add(p_pid) if p_var.get() else self.selected_pids.discard(p_pid)
+
             title_suffix = f" — {proc['window_title'][:50]}" if proc.get('window_title') else " (без окна)"
             cb = ctk.CTkCheckBox(
                 self.frame, 
                 text=f"{proc['name']} (PID: {proc['pid']}){title_suffix}",
                 variable=var,
+                command=_make_cmd(pid, var),
                 text_color="#e0e0e0",
                 fg_color="#2a6d8a",
                 hover_color="#1d4d66"
@@ -123,10 +260,7 @@ class AddFromProcessesDialog(ctk.CTkToplevel):
         self.filtered_procs = self.filtered_processes
 
     def add_selected(self):
-        self.selected_processes = []
-        for idx, var in self.check_vars.items():
-            if var.get():
-                self.selected_processes.append(self.filtered_procs[idx])
+        self.selected_processes = [p for p in self.all_processes if p['pid'] in self.selected_pids]
         if self.selected_processes:
             self.on_add(self.selected_processes)
         self.destroy()
@@ -257,15 +391,24 @@ class TabGames(ctk.CTkFrame):
     def refresh_games(self, *args):
         games = self.db.get_all_games(archived=False)
         sort_key = self.sort_option.get()
+
+        def _get_game_sec(g):
+            if self.tracker and hasattr(self.tracker, 'get_game_total_seconds'):
+                return self.tracker.get_game_total_seconds(g['id'], g.get('total_seconds') or 0)
+            return g.get('total_seconds') or 0
+
         if sort_key == "⏱ По времени":
-            games.sort(key=lambda x: x['total_seconds'], reverse=True)
+            games.sort(key=_get_game_sec, reverse=True)
         elif sort_key == "📅 По дате добавления":
             games.sort(key=lambda x: x['added_at'], reverse=True)
         elif sort_key == "🕒 По дате запуска":
             games.sort(key=lambda x: x['last_launched'] or '', reverse=True)
         elif sort_key == "🎮 По статусу":
-            active_ids = list(self.tracker.active_sessions.keys()) if self.tracker else []
-            games.sort(key=lambda g: (g['id'] not in active_ids, g['display_name']))
+            def _is_active_for_sort(g):
+                if self.tracker and hasattr(self.tracker, 'is_game_currently_playing'):
+                    return not self.tracker.is_game_currently_playing(g['id'])
+                return True
+            games.sort(key=lambda g: (_is_active_for_sort(g), g['display_name']))
 
         self.current_games = [g['id'] for g in games]
 
@@ -285,16 +428,25 @@ class TabGames(ctk.CTkFrame):
 
         self.cards = {}
         for game in games:
-            is_active = game['id'] in (self.tracker.active_sessions.keys() if self.tracker else {})
+            gid = game['id']
+            if self.tracker and hasattr(self.tracker, 'is_game_currently_playing'):
+                is_active = self.tracker.is_game_currently_playing(gid)
+            elif self.tracker and hasattr(self.tracker, 'active_sessions') and not getattr(self.settings, 'track_only_active_window', False):
+                is_active = gid in self.tracker.active_sessions
+            else:
+                is_active = False
+
+            total_sec = _get_game_sec(game)
+
             icon_path = game.get('icon_path')
             if icon_path and not os.path.exists(icon_path):
                 icon_path = None
 
             card = GameCard(
                 self.scrollable_frame,
-                game_id=game['id'],
+                game_id=gid,
                 display_name=game['display_name'],
-                total_seconds=game['total_seconds'],
+                total_seconds=total_sec,
                 last_launched=game.get('last_launched'),
                 is_active=is_active,
                 icon_path=icon_path,
@@ -303,7 +455,7 @@ class TabGames(ctk.CTkFrame):
                 on_delete=self.delete_game
             )
             card.pack(fill="x", padx=10, pady=5)
-            self.cards[game['id']] = card
+            self.cards[gid] = card
 
     def update_tick(self, game_id: int, total_seconds: int, is_active: bool = None):
         # Проверяем, существует ли карточка и не уничтожена ли она
@@ -314,7 +466,12 @@ class TabGames(ctk.CTkFrame):
         try:
             if card.info_label.winfo_exists():
                 if is_active is None:
-                    is_active = game_id in (self.tracker.active_sessions.keys() if self.tracker else {})
+                    if self.tracker and hasattr(self.tracker, 'is_game_currently_playing'):
+                        is_active = self.tracker.is_game_currently_playing(game_id)
+                    elif self.tracker and not getattr(self.settings, 'track_only_active_window', False):
+                        is_active = game_id in self.tracker.active_sessions
+                    else:
+                        is_active = False
                 card.update_time(total_seconds, is_active)
                 # Обновляем дату последнего запуска при первой секунде после старта сессии
                 if total_seconds == 1 or (is_active and not hasattr(card, '_session_launched_updated')):
@@ -327,7 +484,6 @@ class TabGames(ctk.CTkFrame):
                 if not is_active and hasattr(card, '_session_launched_updated'):
                     delattr(card, '_session_launched_updated')
             else:
-                # Карточка уничтожена, но не удаляем из словаря – при следующем refresh_games() она пересоздастся
                 pass
         except Exception:
             pass
@@ -335,18 +491,40 @@ class TabGames(ctk.CTkFrame):
     def filter_games(self):
         search_text = self.search_var.get().strip().lower()
         if not search_text:
-            for card in self.cards.values():
-                card.pack(fill="x", padx=10, pady=5)
-        else:
-            for game_id, card in self.cards.items():
-                if search_text in card.display_name.lower():
-                    card.pack(fill="x", padx=10, pady=5)
-                else:
+            for gid in self.current_games:
+                if gid in self.cards:
+                    card = self.cards[gid]
                     card.pack_forget()
+                    card.pack(fill="x", padx=10, pady=5)
+        else:
+            for gid in self.current_games:
+                if gid in self.cards:
+                    card = self.cards[gid]
+                    card.pack_forget()
+                    if search_text in card.display_name.lower():
+                        card.pack(fill="x", padx=10, pady=5)
 
     def clear_search(self):
         """Очищает поле поиска."""
         self.search_var.set("")
+        self.filter_games()
+
+    def add_detected_game(self, exe_name: str, display_name: str, exe_path: Optional[str]):
+        """Добавляет обнаруженную игру в библиотеку."""
+        if exe_path and os.path.exists(exe_path):
+            existing = self.db.get_game_by_exe_name(exe_name)
+            if existing:
+                return
+            game_id = self.db.add_game(exe_name, display_name, exe_path)
+            icon = self.tracker.get_exe_icon(exe_path) if self.tracker else None
+            if icon:
+                icon_path = os.path.join(self.icons_dir, f"{game_id}.png")
+                icon.save(icon_path, "PNG")
+                self.db.update_icon_path(game_id, icon_path)
+        else:
+            self._add_game_by_name(exe_name, display_name, exe_path, silent=True, refresh=False)
+        self.refresh_games()
+        self._refresh_archive_tab()
 
     def add_game_from_file(self):
         filepath = filedialog.askopenfilename(
@@ -411,11 +589,25 @@ class TabGames(ctk.CTkFrame):
         display_name = os.path.splitext(exe_name)[0].title()
         existing = self.db.get_game_by_exe_name(exe_name)
         if existing:
+            if existing.get('is_archived'):
+                if not silent:
+                    restore = messagebox.askyesno(
+                        "Игра в Архиве",
+                        f"Игра «{existing['display_name']}» находится в Архиве.\n\nВосстановить её в активные игры?"
+                    )
+                    if restore:
+                        self.db.unarchive_game(existing['id'])
+                        if refresh:
+                            self.refresh_games()
+                            self._refresh_archive_tab()
+                        messagebox.showinfo("Успех", f"Игра «{existing['display_name']}» восстановлена из архива!")
+                        return True
+                return False
             if not silent:
                 messagebox.showinfo("Информация", f"Игра {existing['display_name']} уже есть в списке.")
             return False
         game_id = self.db.add_game(exe_name, display_name, exe_path)
-        icon = self.tracker.get_exe_icon(exe_path)
+        icon = self.tracker.get_exe_icon(exe_path) if (self.tracker and hasattr(self.tracker, 'get_exe_icon')) else None
         if icon:
             icon_path = os.path.join(self.icons_dir, f"{game_id}.png")
             icon.save(icon_path, "PNG")
@@ -430,16 +622,39 @@ class TabGames(ctk.CTkFrame):
     def _add_game_by_name(self, exe_name: str, display_name: str, exe_path: Optional[str], silent: bool = False, refresh: bool = True) -> bool:
         existing = self.db.get_game_by_exe_name(exe_name)
         if existing:
+            if existing.get('is_archived'):
+                if not silent:
+                    restore = messagebox.askyesno(
+                        "Игра в Архиве",
+                        f"Игра «{existing['display_name']}» находится в Архиве.\n\nВосстановить её в активные игры?"
+                    )
+                    if restore:
+                        self.db.unarchive_game(existing['id'])
+                        if refresh:
+                            self.refresh_games()
+                            self._refresh_archive_tab()
+                        messagebox.showinfo("Успех", f"Игра «{existing['display_name']}» восстановлена из архива!")
+                        return True
+                return False
             if not silent:
                 messagebox.showinfo("Информация", f"Игра {existing['display_name']} уже есть в списке.")
             return False
-        self.db.add_game(exe_name, display_name, exe_path)
+        game_id = self.db.add_game(exe_name, display_name, exe_path)
+        if exe_path and os.path.exists(exe_path) and hasattr(self.tracker, 'get_exe_icon'):
+            icon = self.tracker.get_exe_icon(exe_path)
+            if icon:
+                icon_path = os.path.join(self.icons_dir, f"{game_id}.png")
+                icon.save(icon_path, "PNG")
+                self.db.update_icon_path(game_id, icon_path)
         if not silent:
             messagebox.showinfo("Успех", f"Игра {display_name} добавлена!")
         if refresh:
             self.refresh_games()
             self._refresh_archive_tab()
         return True
+
+    def add_detected_game(self, exe_name: str, display_name: str, exe_path: Optional[str] = None):
+        return self._add_game_by_name(exe_name, display_name, exe_path, silent=False, refresh=True)
 
     def refresh(self):
         self.refresh_games()

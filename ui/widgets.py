@@ -100,16 +100,25 @@ class GameCard(ctk.CTkFrame):
 
     def _start_rename(self, event=None):
         entry = ctk.CTkEntry(self, font=("Segoe UI", 16, "bold"))
-        entry.grid(row=0, column=1, sticky="w", padx=10, pady=(10, 0))
+        entry.grid(row=0, column=1, sticky="ew", padx=10, pady=(10, 0))
         entry.insert(0, self.display_name)
         self.name_label.grid_remove()
         entry.focus()
 
         saved = False
+        cancelled = False
 
-        def save_rename():
+        def cancel_rename(e=None):
+            nonlocal cancelled
+            if cancelled or saved:
+                return
+            cancelled = True
+            self.name_label.grid()
+            entry.destroy()
+
+        def save_rename(e=None):
             nonlocal saved
-            if saved:
+            if saved or cancelled:
                 return
             saved = True
             new_name = entry.get().strip()
@@ -120,8 +129,9 @@ class GameCard(ctk.CTkFrame):
             self.name_label.grid()
             entry.destroy()
 
-        entry.bind("<Return>", lambda e: save_rename())
-        entry.bind("<FocusOut>", lambda e: save_rename())
+        entry.bind("<Return>", save_rename)
+        entry.bind("<Escape>", cancel_rename)
+        entry.bind("<FocusOut>", save_rename)
 
     def update_time(self, total_seconds: int, is_active: bool):
         self.total_seconds = total_seconds
@@ -135,10 +145,12 @@ class GameCard(ctk.CTkFrame):
 class ArchiveCard(ctk.CTkFrame):
     def __init__(self, master, game_id: int, display_name: str, total_seconds: int,
                  added_at: str, archived_at: str, icon_path: Optional[str],
-                 on_restore: Callable[[int], None], **kwargs):
+                 on_restore: Callable[[int], None],
+                 on_delete: Optional[Callable[[int], None]] = None, **kwargs):
         super().__init__(master, fg_color="#1a1a2e", corner_radius=12, border_width=1, border_color="#7b2fff", **kwargs)
         self.game_id = game_id
         self.on_restore = on_restore
+        self.on_delete = on_delete
 
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
@@ -167,6 +179,14 @@ class ArchiveCard(ctk.CTkFrame):
                                        font=("Segoe UI", 11), text_color="#888888")
         self.date_label.grid(row=1, column=1, sticky="w", padx=10, pady=(0, 10))
 
-        self.restore_btn = NeonButton(self, text="↺ Вернуть", command=lambda: on_restore(game_id),
-                                      accent_color="#00ff88", hover_color="#00cc66", width=100)
-        self.restore_btn.grid(row=0, column=2, rowspan=2, padx=10, pady=10, sticky="e")
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.grid(row=0, column=2, rowspan=2, padx=10, pady=10, sticky="e")
+
+        self.restore_btn = NeonButton(btn_frame, text="↺ Вернуть", command=lambda: on_restore(game_id),
+                                      accent_color="#00ff88", hover_color="#00cc66", width=95)
+        self.restore_btn.pack(side="left", padx=3)
+
+        if on_delete:
+            self.delete_btn = NeonButton(btn_frame, text="🗑 Удалить", command=lambda: on_delete(game_id),
+                                         accent_color="#ff4444", hover_color="#cc0000", width=95)
+            self.delete_btn.pack(side="left", padx=3)

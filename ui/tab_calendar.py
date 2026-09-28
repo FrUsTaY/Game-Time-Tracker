@@ -14,6 +14,11 @@ MONTHS_RU = {
     5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
     9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"
 }
+MONTHS_GENITIVE_RU = {
+    1: "января", 2: "февраля", 3: "марта", 4: "апреля",
+    5: "мая", 6: "июня", 7: "июля", 8: "августа",
+    9: "сентября", 10: "октября", 11: "ноября", 12: "декабря"
+}
 DAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
 
@@ -27,6 +32,8 @@ class TabCalendar(ctk.CTkFrame):
         self.current_date = date.today()
         self.current_year = self.current_date.year
         self.current_month = self.current_date.month
+        self.selected_date = None
+        self.day_cells = {}
         self.sessions_cache = {}  # {date: {game_name: seconds}}
         self.is_loading = False
 
@@ -104,6 +111,17 @@ class TabCalendar(ctk.CTkFrame):
         month_name = MONTHS_RU.get(self.current_month, "")
         self.month_label.configure(text=f"{month_name} {self.current_year}")
 
+    def reset_day_details(self):
+        """Сбрасывает панель подробностей дня в исходное состояние при смене месяца."""
+        old_selected = self.selected_date
+        self.selected_date = None
+        if old_selected:
+            self._update_cell_style(old_selected)
+        self.details_title.configure(text="Выберите день")
+        for widget in self.details_scroll.winfo_children():
+            widget.destroy()
+        self.total_day_label.configure(text="")
+
     def prev_month(self):
         if self.is_loading:
             return
@@ -113,6 +131,7 @@ class TabCalendar(ctk.CTkFrame):
         else:
             self.current_month -= 1
         self._update_month_label()
+        self.reset_day_details()
         self.after(0, self.load_month_data)
 
     def next_month(self):
@@ -124,6 +143,7 @@ class TabCalendar(ctk.CTkFrame):
         else:
             self.current_month += 1
         self._update_month_label()
+        self.reset_day_details()
         self.after(0, self.load_month_data)
 
     def refresh(self):
@@ -167,6 +187,7 @@ class TabCalendar(ctk.CTkFrame):
         # Очищаем календарь
         for widget in self.calendar_frame.winfo_children():
             widget.destroy()
+        self.day_cells = {}
 
         # Заголовки дней недели
         for col, header in enumerate(DAYS_RU):
@@ -208,16 +229,58 @@ class TabCalendar(ctk.CTkFrame):
                     dot = ctk.CTkLabel(cell, text="●", text_color="#00d4ff", font=("Segoe UI", 8))
                     dot.place(relx=0.5, rely=0.85, anchor="center")
 
+                self.day_cells[cell_date] = (cell, cell_date == today)
+
         # Настройка весов
         for col in range(7):
             self.calendar_frame.grid_columnconfigure(col, weight=1)
         for row in range(1, len(cal) + 1):
             self.calendar_frame.grid_rowconfigure(row, weight=1)
 
+        # Если был выбран день в этом месяце, восстанавливаем подсветку
+        if self.selected_date and self.selected_date in self.day_cells:
+            self._update_cell_style(self.selected_date)
+
+    def _update_cell_style(self, cell_date: date):
+        """Обновляет визуальный стиль ячейки (выделение активного дня или сегодняшнего)."""
+        if cell_date not in self.day_cells:
+            return
+        cell, is_today = self.day_cells[cell_date]
+        has_activity = cell_date in self.sessions_cache
+
+        if cell_date == self.selected_date:
+            # Активный выбранный день: яркая неоновая рамка цвета cyan
+            cell.configure(
+                border_width=2,
+                border_color="#00d4ff",
+                fg_color="#005580" if has_activity else "#2a2a4e"
+            )
+        elif is_today:
+            # Сегодняшний день: зелёная рамка
+            cell.configure(
+                border_width=2,
+                border_color="#00ff88",
+                fg_color="#004466" if has_activity else "#1a1a2e"
+            )
+        else:
+            # Обычный день
+            bg = "#004466" if has_activity else "#1a1a2e"
+            cell.configure(
+                border_width=0,
+                border_color=bg,
+                fg_color=bg
+            )
+
     def show_day_details(self, day_date: date):
         """Отображает детали по выбранному дню в нижней панели."""
-        month_name = MONTHS_RU.get(day_date.month, "")
-        self.details_title.configure(text=f"{day_date.day} {month_name} {day_date.year}")
+        old_selected = self.selected_date
+        self.selected_date = day_date
+        if old_selected:
+            self._update_cell_style(old_selected)
+        self._update_cell_style(day_date)
+
+        month_name = MONTHS_GENITIVE_RU.get(day_date.month, "")
+        self.details_title.configure(text=f"{day_date.day} {month_name} {day_date.year} г.")
 
         # Очищаем область списка
         for widget in self.details_scroll.winfo_children():

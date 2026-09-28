@@ -32,8 +32,19 @@ SYSTEM_EXCLUDE_EXES = {
     'applicationframehost.exe', 'runtimebroker.exe', 'lockapp.exe', 'systemsettings.exe',
     'regedit.exe', 'smartscreen.exe', 'securityhealthsystray.exe', 'securityhealthservice.exe',
     'spoolsv.exe', 'audiodg.exe', 'wlanext.exe', 'dashost.exe',
-    # Утилиты разработки и общие консольные инструменты
-    'git.exe', 'python.exe', 'pythonw.exe'
+    # Браузеры
+    'chrome.exe', 'msedge.exe', 'firefox.exe', 'opera.exe', 'brave.exe',
+    'yandex.exe', 'browser.exe', 'vivaldi.exe', 'tor.exe',
+    # Мессенджеры и клиенты связи
+    'telegram.exe', 'discord.exe', 'skype.exe', 'slack.exe', 'whatsapp.exe',
+    'teams.exe', 'viber.exe', 'element.exe', 'zoom.exe',
+    # Медиаплееры, редакторы, системные и игровые лаунчеры
+    'spotify.exe', 'vlc.exe', 'mpc-hc.exe', 'mpc-be.exe', 'foobar2000.exe', 'aimp.exe',
+    'notepad.exe', 'notepad++.exe', 'code.exe', 'devenv.exe',
+    'winrar.exe', '7zfm.exe', 'everything.exe', 'calculator.exe', 'calc.exe',
+    'steam.exe', 'steamwebhelper.exe', 'epicgameslauncher.exe',
+    # Утилиты разработки и исполняемый файл приложения
+    'git.exe', 'python.exe', 'pythonw.exe', 'gametimetracker.exe'
 }
 
 
@@ -67,13 +78,15 @@ class GameTracker:
         settings: AppSettings,
         on_tick: Optional[Callable[[int, int, bool], None]] = None,
         tray: Optional[Any] = None,
-        on_notification: Optional[Callable[[str, str], None]] = None
+        on_notification: Optional[Callable[[str, str], None]] = None,
+        on_game_detected: Optional[Callable[[str, Optional[str]], None]] = None
     ):
         self.db = db
         self.settings = settings
         self.on_tick = on_tick
         self.tray = tray
         self.on_notification = on_notification
+        self.on_game_detected = on_game_detected
 
         # Активные сессии: {game_id: {'session_id': int, 'current_seconds': int, 'last_flushed_seconds': int, 'initial_total_seconds': int, 'process_pid': int, 'was_active': bool, 'long_session_notified': bool}}
         self.active_sessions: Dict[int, Dict[str, Any]] = {}
@@ -86,6 +99,7 @@ class GameTracker:
         # Множества для отслеживания запущенных процессов (.exe) и предотвращения спама уведомлениями
         self._seen_exes: set = set()
         self._notified_new_exes: set = set()
+        self._ignored_exes: set = set()
         self._unwindowed_attempts: Dict[str, int] = {}
 
     def notify(self, title: str, message: str) -> None:
@@ -104,6 +118,36 @@ class GameTracker:
 
         if not self.on_notification and not self.tray:
             print(f"Уведомление: {title} - {message}")
+
+    def get_game_total_seconds(self, game_id: int, default_seconds: int = 0) -> int:
+        """Возвращает актуальное общее время игры с учётом текущей незавершённой сессии"""
+        with self.lock:
+            if game_id in self.active_sessions:
+                info = self.active_sessions[game_id]
+                return info.get('initial_total_seconds', default_seconds) + info.get('current_seconds', 0)
+            return default_seconds
+
+    def is_game_currently_playing(self, game_id: int) -> bool:
+        """Возвращает True, если игра сейчас активно запущена и окно активно (если включена опция track_only_active_window)"""
+        with self.lock:
+            if game_id not in self.active_sessions:
+                return False
+            if not self.settings.track_only_active_window:
+                return True
+            session = self.active_sessions[game_id]
+            if not session.get('was_active', False):
+                return False
+            try:
+                active_pid = self._get_active_window_pid()
+                if not active_pid:
+                    return False
+                return self._is_game_active(game_id, session.get('process_pid', 0), active_pid)
+            except Exception:
+                return session.get('was_active', False)
+
+    def ignore_exe(self, exe_name: str) -> None:
+        """Добавляет имя файла в список игнорируемых, чтобы не предлагать его снова"""
+        self._ignored_exes.add(exe_name.lower())
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -204,7 +248,7 @@ class GameTracker:
                 library_exes = set(games_by_exe.keys())
 
             for exe_name, proc_data in running_processes.items():
-                if exe_name in self._seen_exes:
+                if exe_name in self._seen_exes or exe_name in self._ignored_exes:
                     continue
 
                 # Игнорируем процессы, которые уже есть в библиотеке
@@ -223,7 +267,13 @@ class GameTracker:
                     self._seen_exes.add(exe_name)
                     if exe_name not in self._notified_new_exes:
                         self._notified_new_exes.add(exe_name)
-                        self.notify("GameTimeTracker", f"Обнаружена новая игра: {exe_name}")
+                        clean_name = os.path.splitext(exe_name)[0].replace('_', ' ').replace('-', ' ').title()
+                        self.notify("GameTimeTracker", f"🎮 Обнаружена игра: {clean_name} ({exe_name})! Нажмите для добавления")
+                        if self.on_game_detected:
+                            try:
+                                self.on_game_detected(exe_name, proc_data.get('exe_path'))
+                            except Exception as e:
+                                print(f"GameTracker: ошибка в on_game_detected: {e}")
                 else:
                     # Фоновый процесс без окна (или окно ещё не создано)
                     attempts = self._unwindowed_attempts.get(exe_name, 0) + 1

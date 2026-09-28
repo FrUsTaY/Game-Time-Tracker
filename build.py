@@ -60,7 +60,18 @@ def run_pyinstaller():
 
 def create_launcher_bat():
     """Создаёт bat-файл для удобного запуска exe (опционально)."""
-    bat_content = '@echo off\nstart "" "%~dp0dist\\GameTimeTracker.exe"\nexit'
+    bat_content = (
+        '@echo off\n'
+        'if exist "%~dp0GameTimeTracker.exe" (\n'
+        '    start "" "%~dp0GameTimeTracker.exe"\n'
+        ') else if exist "%~dp0dist\\GameTimeTracker.exe" (\n'
+        '    start "" "%~dp0dist\\GameTimeTracker.exe"\n'
+        ') else (\n'
+        '    echo GameTimeTracker.exe не найден!\n'
+        '    pause\n'
+        ')\n'
+        'exit\n'
+    )
     with open("run_game_tracker.bat", "w", encoding="utf-8") as f:
         f.write(bat_content)
     print("Создан run_game_tracker.bat для быстрого запуска.")

@@ -24,6 +24,7 @@ class App:
         self.tray = None
         self.on_tick_callback = None
         self._is_exiting = False
+        self._background_notified = False
 
         self._init_ui()
         self._init_tracker()
@@ -34,8 +35,15 @@ class App:
         self.window = MainWindow(self.db, None, self.settings, on_exit=self.exit_app)
 
     def _init_tracker(self):
+        def _safe_on_game_detected(exe_name, exe_path):
+            if not self._is_exiting and self.window:
+                try:
+                    self.window.after(0, lambda: self.window.prompt_add_new_game(exe_name, exe_path))
+                except Exception:
+                    pass
+
         # Создаём трекер с временным колбэком
-        self.tracker = GameTracker(self.db, self.settings, None)
+        self.tracker = GameTracker(self.db, self.settings, None, on_game_detected=_safe_on_game_detected)
         self.window.tracker = self.tracker
         # Обновляем трекер во всех вкладках кеша
         for tab in self.window.tabs_cache.values():
@@ -65,6 +73,7 @@ class App:
             self.tracker.tray = self.tray
         self.tray.start()
         if self.settings.minimize_to_tray_on_start:
+            self._background_notified = True
             self.window.after(100, self.window.hide_to_tray)
             self.tray.show_notification(
                 "GameTimeTracker",
@@ -90,7 +99,8 @@ class App:
                 pass
 
     def on_window_close(self):
-        if self.tray:
+        if self.tray and not getattr(self, '_background_notified', False):
+            self._background_notified = True
             self.tray.show_notification(
                 "GameTimeTracker",
                 "Приложение продолжает работать в фоне"

@@ -96,7 +96,8 @@ class TabArchive(ctk.CTkFrame):
                 added_at=game.get('added_at', ''),
                 archived_at=game.get('archived_at', ''),
                 icon_path=icon_path,
-                on_restore=self.restore_game
+                on_restore=self.restore_game,
+                on_delete=self.delete_game
             )
             card.pack(fill="x", padx=10, pady=5)
 
@@ -129,3 +130,24 @@ class TabArchive(ctk.CTkFrame):
                 games_tab.refresh_games()
             elif hasattr(games_tab, 'refresh'):
                 games_tab.refresh()
+
+    def delete_game(self, game_id: int):
+        from tkinter import messagebox
+        if messagebox.askyesno("Удаление", "Вы уверены? Все данные об игре будут удалены безвозвратно."):
+            game = self.db.get_game_by_id(game_id)
+            if game and game.get('icon_path') and os.path.exists(game['icon_path']):
+                try:
+                    os.remove(game['icon_path'])
+                except Exception:
+                    pass
+            self.db.delete_game(game_id)
+            self.refresh()
+            main_win = self._get_main_window()
+            if main_win and hasattr(main_win, 'refresh_tab'):
+                main_win.refresh_tab('games')
+            elif main_win and hasattr(main_win, 'tabs_cache') and 'games' in main_win.tabs_cache:
+                games_tab = main_win.tabs_cache['games']
+                if hasattr(games_tab, 'refresh_games'):
+                    games_tab.refresh_games()
+                elif hasattr(games_tab, 'refresh'):
+                    games_tab.refresh()

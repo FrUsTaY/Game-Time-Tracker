@@ -201,6 +201,21 @@ class MainWindow(ctk.CTk):
         self.lift()
         self.focus_force()
 
+    def prompt_add_new_game(self, exe_name: str, exe_path: str = None):
+        """Отображает диалог добавления обнаруженной игры с красивым именем."""
+        from ui.tab_games import AddNewGameDialog
+        self.show_window()
+        if self.current_tab_key != "games":
+            self.show_tab("games")
+
+        games_tab = self.tabs_cache.get("games")
+
+        def on_add(exe, title, path):
+            if games_tab and hasattr(games_tab, 'add_detected_game'):
+                games_tab.add_detected_game(exe, title, path)
+
+        AddNewGameDialog(self, exe_name=exe_name, exe_path=exe_path, tracker=self.tracker, on_confirm=on_add)
+
     def confirm_exit(self):
         """Подтверждение выхода из приложения."""
         from tkinter import messagebox

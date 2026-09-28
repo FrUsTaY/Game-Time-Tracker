@@ -243,11 +243,27 @@ class TabStats(ctk.CTkFrame):
             self.activity_fig.clear()
 
         ax = self.activity_fig.add_subplot()
-        ax.bar(dates, hours_list, color='#7b2fff', edgecolor='#00d4ff', alpha=0.7)
+        x_indices = list(range(len(dates)))
+        ax.bar(x_indices, hours_list, color='#7b2fff', edgecolor='#00d4ff', alpha=0.7, width=0.8)
         ax.set_xlabel('Дата', color='#e0e0e0')
         ax.set_ylabel('Часы', color='#e0e0e0')
         ax.set_title(f'Активность за последние {days} дней', color='#00d4ff')
-        plt.setp(ax.get_xticklabels(), rotation=45, ha='right', fontsize=8)
+
+        # Прореживание меток дат на оси X при большом числе дней (30, 90 дней)
+        if len(dates) > 30:
+            step = 7  # Для 90 дней шаг раз в неделю
+        elif len(dates) > 14:
+            step = 3  # Для 30 дней шаг раз в 3 дня
+        else:
+            step = 1  # Для 7 дней показываем каждый день
+
+        tick_indices = list(range(0, len(dates), step))
+        if (len(dates) - 1) not in tick_indices:
+            tick_indices.append(len(dates) - 1)
+
+        ax.set_xticks(tick_indices)
+        ax.set_xticklabels([dates[i] for i in tick_indices], rotation=45, ha='right', fontsize=8)
+        ax.set_xlim(-0.8, len(dates) - 0.2)
         self.activity_fig.tight_layout()
         self.activity_canvas.draw()
 
