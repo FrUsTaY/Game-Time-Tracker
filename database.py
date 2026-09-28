@@ -20,6 +20,7 @@ class Database:
         Args:
             db_path: путь к файлу базы данных
         """
+        # Создаём директорию для БД, если её нет (и если это не in-memory БД)
         # Создаём директорию для БД, если её нет
         db_dir = os.path.dirname(db_path)
         if db_dir:

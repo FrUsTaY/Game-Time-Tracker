@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from database import Database
 
 
+
 class TestDatabaseAddGame(unittest.TestCase):
     def setUp(self):
         self.fd, self.temp_db_path = tempfile.mkstemp(suffix='.db')
@@ -271,6 +272,53 @@ class TestDatabaseUpdateTime(unittest.TestCase):
             self.db.update_game_time(non_existent_id, 3600)
         except Exception as e:
             self.fail(f"update_game_time raised an exception for non-existent game: {e}")
+
+
+class TestDatabaseArchiveGame(unittest.TestCase):
+    def setUp(self):
+        """Создаем in-memory базу данных перед каждым тестом"""
+        self.db = Database(":memory:")
+
+    def tearDown(self):
+        """Закрываем соединение после каждого теста"""
+        self.db.close()
+
+    def test_archive_game(self):
+        """Тест архивации игры и получения списка архивированных игр"""
+        game_id = self.db.add_game("test_game.exe", "Test Game", "C:\\test\\test_game.exe")
+
+        active_games = self.db.get_all_games(archived=False)
+        self.assertEqual(len(active_games), 1)
+        self.assertEqual(active_games[0]['id'], game_id)
+        self.assertEqual(active_games[0]['is_archived'], 0)
+        self.assertIsNone(active_games[0]['archived_at'])
+
+        archived_games = self.db.get_all_games(archived=True)
+        self.assertEqual(len(archived_games), 0)
+
+        self.db.archive_game(game_id)
+
+        active_games_after = self.db.get_all_games(archived=False)
+        self.assertEqual(len(active_games_after), 0)
+
+        archived_games_after = self.db.get_all_games(archived=True)
+        self.assertEqual(len(archived_games_after), 1)
+
+        archived_game = archived_games_after[0]
+        self.assertEqual(archived_game['id'], game_id)
+        self.assertEqual(archived_game['is_archived'], 1)
+        self.assertIsNotNone(archived_game['archived_at'])
+
+        self.db.unarchive_game(game_id)
+
+        active_games_final = self.db.get_all_games(archived=False)
+        self.assertEqual(len(active_games_final), 1)
+        self.assertEqual(active_games_final[0]['id'], game_id)
+        self.assertEqual(active_games_final[0]['is_archived'], 0)
+        self.assertIsNone(active_games_final[0]['archived_at'])
+
+        archived_games_final = self.db.get_all_games(archived=True)
+        self.assertEqual(len(archived_games_final), 0)
 
 
 class TestDatabaseEndSessionAndDelete(unittest.TestCase):
