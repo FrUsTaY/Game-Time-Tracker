@@ -457,6 +457,10 @@ class TabGames(ctk.CTkFrame):
             card.pack(fill="x", padx=10, pady=5)
             self.cards[gid] = card
 
+        # Повторно применяем текущий поисковый фильтр к новым карточкам
+        if hasattr(self, 'search_var') and self.search_var.get().strip():
+            self.filter_games()
+
     def update_tick(self, game_id: int, total_seconds: int, is_active: bool = None):
         # Проверяем, существует ли карточка и не уничтожена ли она
         if game_id not in self.cards:
@@ -688,6 +692,7 @@ class TabGames(ctk.CTkFrame):
             self.cards[game_id].name_label.configure(text=new_name)
         else:
             self.refresh_games()
+        self.filter_games()
 
     def archive_game(self, game_id: int):
         if messagebox.askyesno("Архивация", "Переместить игру в архив?"):

@@ -102,6 +102,18 @@ class SettingsWindow(ctk.CTkToplevel):
         minutes_entry.pack(side="left", padx=5)
         ctk.CTkLabel(minutes_frame, text="минут", text_color="#e0e0e0").pack(side="left")
         self.minutes_entry = minutes_entry
+        # ---- Не отслеживаются ----
+        self._add_section(main_frame, "Не отслеживаются")
+        desc_label = ctk.CTkLabel(
+            main_frame,
+            text="Процессы, для которых ранее был выбран отказ от отслеживания:",
+            font=("Segoe UI", 11), text_color="#888888"
+        )
+        desc_label.pack(anchor="w", padx=20, pady=(0, 5))
+
+        self.ignored_frame = ctk.CTkFrame(main_frame, fg_color="#1a1a2e", corner_radius=8)
+        self.ignored_frame.pack(anchor="w", padx=20, pady=(0, 10), fill="x")
+        self._refresh_ignored_list()
 
         # ---- Данные ----
         self._add_section(main_frame, "Данные")
@@ -179,6 +191,59 @@ class SettingsWindow(ctk.CTkToplevel):
             self.minutes_entry.configure(state="normal")
         else:
             self.minutes_entry.configure(state="disabled")
+
+    def _refresh_ignored_list(self):
+        """Обновляет список процессов в секции 'Не отслеживаются'."""
+        for widget in self.ignored_frame.winfo_children():
+            widget.destroy()
+
+        ignored = self.db.get_ignored_processes() if (self.db and hasattr(self.db, 'get_ignored_processes')) else []
+        if not ignored:
+            empty_lbl = ctk.CTkLabel(
+                self.ignored_frame,
+                text="Список пуст. Процессы, для которых выбран отказ, появятся здесь.",
+                font=("Segoe UI", 11),
+                text_color="#666666"
+            )
+            empty_lbl.pack(pady=10)
+            return
+
+        for row in ignored:
+            exe_name = row['exe_name']
+            item_frame = ctk.CTkFrame(self.ignored_frame, fg_color="transparent")
+            item_frame.pack(fill="x", padx=10, pady=4)
+
+            name_lbl = ctk.CTkLabel(
+                item_frame,
+                text=f"•  {exe_name}",
+                font=("Consolas", 12),
+                text_color="#e0e0e0"
+            )
+            name_lbl.pack(side="left", padx=5)
+
+            def make_unignore_cmd(exe):
+                return lambda: self._unignore_process(exe)
+
+            allow_btn = ctk.CTkButton(
+                item_frame,
+                text="Разрешить отслеживание",
+                command=make_unignore_cmd(exe_name),
+                fg_color="#2a6d8a",
+                hover_color="#1d4d66",
+                text_color="#ffffff",
+                height=26,
+                font=("Segoe UI", 11),
+                width=170
+            )
+            allow_btn.pack(side="right", padx=5)
+
+    def _unignore_process(self, exe_name: str):
+        """Удаляет процесс из игнорируемых и обновляет список."""
+        if hasattr(self.master, 'tracker') and self.master.tracker and hasattr(self.master.tracker, 'unignore_exe'):
+            self.master.tracker.unignore_exe(exe_name)
+        elif self.db and hasattr(self.db, 'remove_ignored_process'):
+            self.db.remove_ignored_process(exe_name)
+        self._refresh_ignored_list()
 
     def _on_autostart_toggle(self):
         """Раньше применял настройку мгновенно, теперь сохранение происходит только в save_and_close()."""

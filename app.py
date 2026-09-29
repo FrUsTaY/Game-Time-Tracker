@@ -38,7 +38,7 @@ class App:
         def _safe_on_game_detected(exe_name, exe_path):
             if not self._is_exiting and self.window:
                 try:
-                    self.window.after(0, lambda: self.window.prompt_add_new_game(exe_name, exe_path))
+                    self.window.after(0, lambda: self.window.add_detected_notification(exe_name, exe_path))
                 except Exception:
                     pass
 
@@ -67,7 +67,8 @@ class App:
             icon_path=resource_path("assets/icon.png"),
             on_open=self.show_window,
             on_settings=self.open_settings,
-            on_exit=self.exit_app
+            on_exit=self.exit_app,
+            on_notification_click=self.on_notification_click
         )
         if self.tracker:
             self.tracker.tray = self.tray
@@ -95,6 +96,13 @@ class App:
         if self.window:
             try:
                 self.window.after(0, self.window.open_settings)
+            except Exception:
+                pass
+
+    def on_notification_click(self, *args):
+        if self.window and not self._is_exiting:
+            try:
+                self.window.after(0, self.window.open_detected_game_from_notification)
             except Exception:
                 pass
 

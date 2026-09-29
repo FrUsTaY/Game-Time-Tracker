@@ -13,6 +13,193 @@ from ui.settings_window import SettingsWindow
 from utils import get_base_dir, resource_path
 
 
+class NotificationsDialog(ctk.CTkToplevel):
+    """Окно списка уведомлений о новых процессах."""
+    def __init__(self, parent, db, tracker, on_add_game, on_remove_notification):
+        super().__init__(parent)
+        self.db = db
+        self.tracker = tracker
+        self.on_add_game = on_add_game
+        self.on_remove_notification = on_remove_notification
+
+        self.title("🔔 Уведомления")
+        self.geometry("540x420")
+        self.minsize(450, 300)
+        self.resizable(True, True)
+
+        self.withdraw()
+        self.update_idletasks()
+        try:
+            x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
+            y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
+            self.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+        self.deiconify()
+        self.focus_force()
+
+        self._build_ui()
+        self.refresh()
+
+    def _build_ui(self):
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        # Заголовок
+        header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(15, 10))
+
+        title_lbl = ctk.CTkLabel(
+            header_frame,
+            text="🔔 Обнаруженные процессы",
+            font=("Segoe UI", 16, "bold"),
+            text_color="#00d4ff"
+        )
+        title_lbl.pack(side="left")
+
+        # Список
+        self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color="#1a1a2e", corner_radius=8)
+        self.scroll_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 15))
+        self.scroll_frame.grid_columnconfigure(0, weight=1)
+
+        # Нижняя панель
+        bottom_frame = ctk.CTkFrame(self, fg_color="transparent")
+        bottom_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 15))
+
+        self.clear_btn = ctk.CTkButton(
+            bottom_frame,
+            text="Очистить все",
+            command=self.clear_all,
+            fg_color="#333333",
+            hover_color="#555555",
+            text_color="#ffffff",
+            width=120
+        )
+        self.clear_btn.pack(side="left")
+
+        close_btn = ctk.CTkButton(
+            bottom_frame,
+            text="Закрыть",
+            command=self.destroy,
+            fg_color="#00d4ff",
+            hover_color="#0099cc",
+            text_color="#0d0d0d",
+            font=("Segoe UI", 12, "bold"),
+            width=100
+        )
+        close_btn.pack(side="right")
+
+    def refresh(self):
+        for widget in self.scroll_frame.winfo_children():
+            widget.destroy()
+
+        notifications = self.db.get_pending_notifications() if (self.db and hasattr(self.db, 'get_pending_notifications')) else []
+        if not notifications:
+            self.clear_btn.configure(state="disabled")
+            empty_lbl = ctk.CTkLabel(
+                self.scroll_frame,
+                text="Нет новых уведомлений\nЗдесь будут появляться процессы, обнаруженные трекером в фоновом режиме.",
+                font=("Segoe UI", 13),
+                text_color="#888888"
+            )
+            empty_lbl.pack(pady=40)
+            return
+
+        self.clear_btn.configure(state="normal")
+        for item in notifications:
+            exe_name = item['exe_name']
+            exe_path = item.get('exe_path')
+            clean_name = os.path.splitext(exe_name)[0].replace('_', ' ').replace('-', ' ').title()
+
+            card = ctk.CTkFrame(self.scroll_frame, fg_color="#121224", corner_radius=8, border_width=1, border_color="#2a2a4e")
+            card.pack(fill="x", padx=5, pady=6)
+            card.grid_columnconfigure(0, weight=1)
+
+            top_row = ctk.CTkFrame(card, fg_color="transparent")
+            top_row.pack(fill="x", padx=12, pady=(10, 4))
+
+            name_lbl = ctk.CTkLabel(
+                top_row,
+                text=f"🎮 {clean_name}",
+                font=("Segoe UI", 13, "bold"),
+                text_color="#00d4ff"
+            )
+            name_lbl.pack(side="left")
+
+            exe_lbl = ctk.CTkLabel(
+                card,
+                text=f"Файл: {exe_name}",
+                font=("Consolas", 11),
+                text_color="#aaaaaa"
+            )
+            exe_lbl.pack(anchor="w", padx=12, pady=(0, 8))
+
+            btn_row = ctk.CTkFrame(card, fg_color="transparent")
+            btn_row.pack(fill="x", padx=12, pady=(0, 10))
+
+            add_btn = ctk.CTkButton(
+                btn_row,
+                text="➕ Добавить в трекер",
+                command=lambda e=exe_name, p=exe_path: self._add(e, p),
+                fg_color="#00d4ff",
+                hover_color="#0099cc",
+                text_color="#0d0d0d",
+                font=("Segoe UI", 11, "bold"),
+                height=30,
+                width=150
+            )
+            add_btn.pack(side="left", padx=(0, 8))
+
+            ignore_btn = ctk.CTkButton(
+                btn_row,
+                text="❌ Не отслеживать",
+                command=lambda e=exe_name: self._ignore(e),
+                fg_color="#333333",
+                hover_color="#555555",
+                text_color="#ffffff",
+                font=("Segoe UI", 11),
+                height=30,
+                width=130
+            )
+            ignore_btn.pack(side="left", padx=(0, 8))
+
+            skip_btn = ctk.CTkButton(
+                btn_row,
+                text="Пропустить",
+                command=lambda e=exe_name: self._skip(e),
+                fg_color="transparent",
+                hover_color="#2a2a4e",
+                text_color="#888888",
+                font=("Segoe UI", 11),
+                height=30,
+                width=90
+            )
+            skip_btn.pack(side="right")
+
+    def _add(self, exe_name, exe_path):
+        self.destroy()
+        self.on_add_game(exe_name, exe_path)
+
+    def _ignore(self, exe_name):
+        if self.tracker and hasattr(self.tracker, 'ignore_exe'):
+            self.tracker.ignore_exe(exe_name)
+        self.on_remove_notification(exe_name)
+        self.refresh()
+
+    def _skip(self, exe_name):
+        self.on_remove_notification(exe_name)
+        self.refresh()
+
+    def clear_all(self):
+        if self.db and hasattr(self.db, 'clear_pending_notifications'):
+            self.db.clear_pending_notifications()
+        if hasattr(self.master, 'pending_notifications'):
+            self.master.pending_notifications = []
+            if hasattr(self.master, 'update_notifications_badge'):
+                self.master.update_notifications_badge()
+        self.refresh()
+
+
 class MainWindow(ctk.CTk):
     def __init__(self, db, tracker, settings, on_exit=None):
         super().__init__()
@@ -23,19 +210,24 @@ class MainWindow(ctk.CTk):
         self.current_tab = None
         self.current_tab_key = None
         self.tabs_cache = {}   # Для хранения ссылок на созданные вкладки (если нужно обновлять время)
+        self.pending_notifications = self.db.get_pending_notifications() if (self.db and hasattr(self.db, 'get_pending_notifications')) else []
+        self._notifications_window = None
 
         self.title("GameTimeTracker")
         self.geometry("1100x700")
         self.minsize(900, 500)
 
-        ico_path = resource_path("assets/app.ico")
-        png_path = resource_path("assets/icon.png")
-        if os.path.exists(ico_path):
-            self.iconbitmap(ico_path)
-        if os.path.exists(png_path):
-            icon_img = Image.open(png_path)
-            icon_photo = ImageTk.PhotoImage(icon_img)
-            self.iconphoto(True, icon_photo)
+        try:
+            ico_path = resource_path("assets/app.ico")
+            png_path = resource_path("assets/icon.png")
+            if os.path.exists(ico_path):
+                self.iconbitmap(ico_path)
+            if os.path.exists(png_path):
+                icon_img = Image.open(png_path)
+                icon_photo = ImageTk.PhotoImage(icon_img)
+                self.iconphoto(True, icon_photo)
+        except Exception:
+            pass
 
         self.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
 
@@ -81,6 +273,20 @@ class MainWindow(ctk.CTk):
             )
             btn.pack(fill="x", padx=10, pady=5)
             self.nav_buttons[text] = (btn, key)
+
+        # Кнопка колокольчика / уведомлений
+        self.notifications_btn = ctk.CTkButton(
+            self.sidebar,
+            text="🔔 Уведомления",
+            command=self.show_notifications_window,
+            fg_color="transparent",
+            text_color="#e0e0e0",
+            hover_color="#2a2a4e",
+            anchor="w",
+            font=("Segoe UI", 14)
+        )
+        self.notifications_btn.pack(fill="x", padx=10, pady=(15, 5))
+        self.update_notifications_badge()
 
         # Кнопка настроек
         self.settings_btn = ctk.CTkButton(
@@ -201,20 +407,104 @@ class MainWindow(ctk.CTk):
         self.lift()
         self.focus_force()
 
+    def update_notifications_badge(self):
+        """Обновляет бейдж на кнопке уведомлений."""
+        count = len(self.pending_notifications)
+        if count > 0:
+            self.notifications_btn.configure(
+                text=f"🔔 Уведомления ({count})",
+                text_color="#00d4ff"
+            )
+        else:
+            self.notifications_btn.configure(
+                text="🔔 Уведомления",
+                text_color="#e0e0e0"
+            )
+
+    def add_detected_notification(self, exe_name: str, exe_path: str = None):
+        """
+        Регистрирует обнаруженный процесс в списке уведомлений без принудительного
+        восстановления и фокуса главного окна приложения.
+        """
+        if not exe_name:
+            return
+        if self.db and hasattr(self.db, 'add_pending_notification'):
+            self.db.add_pending_notification(exe_name, exe_path)
+            self.pending_notifications = self.db.get_pending_notifications()
+        else:
+            if not any(n['exe_name'].lower() == exe_name.lower() for n in self.pending_notifications):
+                self.pending_notifications.insert(0, {'exe_name': exe_name, 'exe_path': exe_path})
+
+        self.update_notifications_badge()
+        if self._notifications_window and self._notifications_window.winfo_exists():
+            self._notifications_window.refresh()
+
+    def remove_pending_notification(self, exe_name: str):
+        """Удаляет уведомление из базы и локального списка."""
+        if not exe_name:
+            return
+        if self.db and hasattr(self.db, 'remove_pending_notification'):
+            self.db.remove_pending_notification(exe_name)
+            self.pending_notifications = self.db.get_pending_notifications()
+        else:
+            self.pending_notifications = [n for n in self.pending_notifications if n['exe_name'].lower() != exe_name.lower()]
+
+        self.update_notifications_badge()
+        if self._notifications_window and self._notifications_window.winfo_exists():
+            self._notifications_window.refresh()
+
+    def show_notifications_window(self):
+        """Открывает окно списка ожидающих уведомлений."""
+        if self._notifications_window is not None:
+            try:
+                if self._notifications_window.winfo_exists():
+                    self._notifications_window.lift()
+                    self._notifications_window.focus_force()
+                    return
+            except Exception:
+                pass
+        self._notifications_window = NotificationsDialog(
+            self,
+            self.db,
+            self.tracker,
+            on_add_game=self.prompt_add_new_game,
+            on_remove_notification=self.remove_pending_notification
+        )
+
+    def open_detected_game_from_notification(self):
+        """Вызывается только при клике пользователя по системному уведомлению."""
+        self.show_window()
+        if self.pending_notifications:
+            latest = self.pending_notifications[0]
+            self.prompt_add_new_game(latest['exe_name'], latest.get('exe_path'))
+        else:
+            self.show_notifications_window()
+
     def prompt_add_new_game(self, exe_name: str, exe_path: str = None):
         """Отображает диалог добавления обнаруженной игры с красивым именем."""
-        from ui.tab_games import AddNewGameDialog
+        from ui.tab_games import AddNewGameDialog, TabGames
         self.show_window()
         if self.current_tab_key != "games":
-            self.show_tab("games")
+            self.show_tab("games", TabGames)
 
         games_tab = self.tabs_cache.get("games")
 
         def on_add(exe, title, path):
             if games_tab and hasattr(games_tab, 'add_detected_game'):
                 games_tab.add_detected_game(exe, title, path)
+            self.remove_pending_notification(exe)
 
-        AddNewGameDialog(self, exe_name=exe_name, exe_path=exe_path, tracker=self.tracker, on_confirm=on_add)
+        def on_ignore(exe):
+            self.remove_pending_notification(exe)
+
+        AddNewGameDialog(
+            self,
+            exe_name=exe_name,
+            exe_path=exe_path,
+            tracker=self.tracker,
+            on_confirm=on_add,
+            on_ignore=on_ignore
+        )
 
     def confirm_exit(self):
         """Подтверждение выхода из приложения."""

@@ -197,11 +197,14 @@ class TestAudit3Task3ArchivedGamesStats(unittest.TestCase):
         self.db.close()
 
     def test_summary_card_total_hours_includes_archived(self):
-        """Карточка «Всего часов» учитывает как активные, так и архивные игры"""
+        """Карточка «Всего часов» учитывает как активные, так и архивные игры при включенном переключателе"""
         tab = TabStats(self.root, self.db)
-        tab._update_summary_cards()
+        # По умолчанию архив выключен (только активные 2.0 ч)
+        self.assertIn("2.0 ч", tab.card_total_hours.value_label.cget("text"))
 
-        # Суммарное время: 2.0 ч + 3.0 ч = 5.0 ч (в архиве: 3.0 ч)
+        # Включаем учет архива: 2.0 ч + 3.0 ч = 5.0 ч (в архиве: 3.0 ч)
+        tab.include_archive_var.set(True)
+        tab.load_stats()
         card_text = tab.card_total_hours.value_label.cget("text")
         self.assertIn("5.0 ч", card_text)
         self.assertIn("3.0 ч", card_text)
@@ -209,14 +212,15 @@ class TestAudit3Task3ArchivedGamesStats(unittest.TestCase):
         tab.destroy()
 
     def test_moving_game_to_archive_preserves_total_hours(self):
-        """Перенос активной игры в архив не уменьшает общее наигранное время"""
+        """При включенном переключателе перенос активной игры в архив не уменьшает общее наигранное время"""
         tab = TabStats(self.root, self.db)
-        tab._update_summary_cards()
+        tab.include_archive_var.set(True)
+        tab.load_stats()
         text_before = tab.card_total_hours.value_label.cget("text")
 
         # Переносим активную игру в архив
         self.db.archive_game(self.active_id)
-        tab._update_summary_cards()
+        tab.load_stats()
         text_after = tab.card_total_hours.value_label.cget("text")
 
         self.assertIn("5.0 ч", text_before)
@@ -225,9 +229,10 @@ class TestAudit3Task3ArchivedGamesStats(unittest.TestCase):
         tab.destroy()
 
     def test_top_games_includes_archived_games(self):
-        """График топа игр включает архивированные игры, если их время в топе"""
+        """График топа игр включает архивированные игры при включенном учете архива"""
         tab = TabStats(self.root, self.db)
-        tab._update_top_games(top_n=5)
+        tab.include_archive_var.set(True)
+        tab.load_stats()
 
         # Archived Game имеет 10800 сек (3 ч), Active Game имеет 7200 сек (2 ч)
         # Обе игры должны быть показаны

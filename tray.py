@@ -19,12 +19,14 @@ class SystemTray:
         icon_path: str,
         on_open: Callable,
         on_settings: Callable,
-        on_exit: Callable
+        on_exit: Callable,
+        on_notification_click: Callable = None
     ):
         self.icon_path = icon_path
         self.on_open = on_open
         self.on_settings = on_settings
         self.on_exit = on_exit
+        self.on_notification_click = on_notification_click
 
         self.icon = None
         self.thread = None
@@ -71,6 +73,20 @@ class SystemTray:
 
     def _run(self):
         self.icon = pystray.Icon("GameTimeTracker", self._image, "GameTimeTracker", self._setup_menu())
+        if hasattr(self.icon, '_on_notify'):
+            orig_on_notify = self.icon._on_notify
+
+            def custom_on_notify(wparam, lparam):
+                # 1029 (0x0405) = NIN_BALLOONUSERCLICK в Windows
+                if lparam == 1029:
+                    if self.on_notification_click:
+                        try:
+                            self.on_notification_click()
+                        except Exception as e:
+                            print(f"SystemTray: ошибка в on_notification_click: {e}")
+                return orig_on_notify(wparam, lparam)
+
+            self.icon._on_notify = custom_on_notify
         self.icon.run()
 
     def start(self):

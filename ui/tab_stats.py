@@ -55,26 +55,42 @@ class TabStats(ctk.CTkFrame):
         self.main_canvas.grid(row=0, column=0, sticky="nsew", padx=20, pady=10)
         self.main_canvas.grid_columnconfigure(0, weight=1)
 
+        # Верхняя панель с переключателем «Учитывать архив»
+        self.top_ctrl_frame = ctk.CTkFrame(self.main_canvas, fg_color="transparent")
+        self.top_ctrl_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+
+        self.include_archive_var = ctk.BooleanVar(value=False)
+        self.archive_switch = ctk.CTkSwitch(
+            self.top_ctrl_frame,
+            text="Учитывать архив",
+            variable=self.include_archive_var,
+            command=self.load_stats,
+            font=("Segoe UI", 13),
+            text_color="#e0e0e0",
+            progress_color="#00d4ff"
+        )
+        self.archive_switch.pack(side="right", padx=10)
+
         # Сводные карточки
         self.cards_frame = ctk.CTkFrame(self.main_canvas, fg_color="transparent")
-        self.cards_frame.grid(row=0, column=0, sticky="ew", pady=10)
+        self.cards_frame.grid(row=1, column=0, sticky="ew", pady=10)
         for i in range(4):
             self.cards_frame.grid_columnconfigure(i, weight=1)
 
         self.card_total_hours = self._create_stat_card(self.cards_frame, "Всего часов", "0 ч", 0)
         self.card_longest_session = self._create_stat_card(self.cards_frame, "Самая долгая сессия", "—", 1)
         self.card_best_day = self._create_stat_card(self.cards_frame, "Самый активный день", "—", 2)
-        self.card_counts = self._create_stat_card(self.cards_frame, "Игр в библиотеке / архиве", "0 / 0", 3)
+        self.card_counts = self._create_stat_card(self.cards_frame, "Игр в библиотеке", "0", 3)
 
         # Топ игр
         self.top_label = ctk.CTkLabel(
             self.main_canvas, text="🏆 Топ игр по времени",
             font=("Consolas", 16, "bold"), text_color="#00d4ff"
         )
-        self.top_label.grid(row=1, column=0, sticky="w", pady=(20, 5))
+        self.top_label.grid(row=2, column=0, sticky="w", pady=(20, 5))
 
         self.top_frame = ctk.CTkFrame(self.main_canvas, fg_color="#1a1a2e", corner_radius=12)
-        self.top_frame.grid(row=2, column=0, sticky="ew", pady=5)
+        self.top_frame.grid(row=3, column=0, sticky="ew", pady=5)
         self.top_frame.grid_columnconfigure(0, weight=1)
 
         # График активности
@@ -82,10 +98,10 @@ class TabStats(ctk.CTkFrame):
             self.main_canvas, text="📈 График активности",
             font=("Consolas", 16, "bold"), text_color="#00d4ff"
         )
-        self.activity_label.grid(row=3, column=0, sticky="w", pady=(20, 5))
+        self.activity_label.grid(row=4, column=0, sticky="w", pady=(20, 5))
 
         self.period_frame = ctk.CTkFrame(self.main_canvas, fg_color="transparent")
-        self.period_frame.grid(row=4, column=0, sticky="w", pady=5)
+        self.period_frame.grid(row=5, column=0, sticky="w", pady=5)
         self.period_var = ctk.StringVar(value="30")
         for days, text in [("7", "7 дней"), ("30", "30 дней"), ("90", "90 дней")]:
             btn = ctk.CTkRadioButton(
@@ -95,17 +111,17 @@ class TabStats(ctk.CTkFrame):
             btn.pack(side="left", padx=10)
 
         self.activity_frame = ctk.CTkFrame(self.main_canvas, fg_color="#1a1a2e", corner_radius=12)
-        self.activity_frame.grid(row=5, column=0, sticky="ew", pady=5)
+        self.activity_frame.grid(row=6, column=0, sticky="ew", pady=5)
 
         # Среднее время сессии
         self.avg_label = ctk.CTkLabel(
             self.main_canvas, text="⏱ Среднее время сессии",
             font=("Consolas", 16, "bold"), text_color="#00d4ff"
         )
-        self.avg_label.grid(row=6, column=0, sticky="w", pady=(20, 5))
+        self.avg_label.grid(row=7, column=0, sticky="w", pady=(20, 5))
 
         self.avg_frame = ctk.CTkFrame(self.main_canvas, fg_color="#1a1a2e", corner_radius=12)
-        self.avg_frame.grid(row=7, column=0, sticky="ew", pady=5)
+        self.avg_frame.grid(row=8, column=0, sticky="ew", pady=5)
         self.avg_frame.grid_columnconfigure(0, weight=1)
 
         self.avg_table = ctk.CTkScrollableFrame(self.avg_frame, fg_color="transparent")
@@ -129,29 +145,40 @@ class TabStats(ctk.CTkFrame):
         self.load_stats()
 
     def load_stats(self):
-        self._update_summary_cards()
-        self._update_top_games()
-        self.update_activity_graph()
-        self._update_avg_session_time()
+        include_archived = self.include_archive_var.get() if hasattr(self, 'include_archive_var') else False
+        self._update_summary_cards(include_archived)
+        self._update_top_games(top_n=5, include_archived=include_archived)
+        self.update_activity_graph(include_archived)
+        self._update_avg_session_time(include_archived)
 
-    def _update_summary_cards(self):
+    def _update_summary_cards(self, include_archived: bool = None):
+        if include_archived is None:
+            include_archived = self.include_archive_var.get() if hasattr(self, 'include_archive_var') else False
+
         games = self.db.get_all_games(archived=False)
         archived_games = self.db.get_all_games(archived=True)
         active_count = len(games)
         archived_count = len(archived_games)
 
-        all_games = games + archived_games
-        total_seconds = sum((g.get('total_seconds') or 0) for g in all_games)
-        total_hours = total_seconds / 3600
-        archived_seconds = sum((g.get('total_seconds') or 0) for g in archived_games)
-        archived_hours = archived_seconds / 3600
+        if include_archived:
+            all_games = games + archived_games
+            total_seconds = sum((g.get('total_seconds') or 0) for g in all_games)
+            total_hours = total_seconds / 3600
+            archived_seconds = sum((g.get('total_seconds') or 0) for g in archived_games)
+            archived_hours = archived_seconds / 3600
 
-        if archived_seconds > 0:
-            self.card_total_hours.value_label.configure(text=f"{total_hours:.1f} ч\n(в архиве: {archived_hours:.1f} ч)")
+            if archived_seconds > 0:
+                self.card_total_hours.value_label.configure(text=f"{total_hours:.1f} ч\n(в архиве: {archived_hours:.1f} ч)")
+            else:
+                self.card_total_hours.value_label.configure(text=f"{total_hours:.1f} ч")
+            self.card_counts.value_label.configure(text=f"{active_count + archived_count}\n({active_count} акт. / {archived_count} арх.)")
         else:
+            total_seconds = sum((g.get('total_seconds') or 0) for g in games)
+            total_hours = total_seconds / 3600
             self.card_total_hours.value_label.configure(text=f"{total_hours:.1f} ч")
+            self.card_counts.value_label.configure(text=f"{active_count}")
 
-        longest = self.db.get_longest_session()
+        longest = self.db.get_longest_session(include_archived=include_archived)
         longest_dur = (longest.get('duration_seconds') or 0) if longest else 0
         if longest and longest_dur > 0:
             hours = longest_dur / 3600
@@ -161,7 +188,7 @@ class TabStats(ctk.CTkFrame):
         else:
             self.card_longest_session.value_label.configure(text="Нет данных")
 
-        best_day = self.db.get_best_day()
+        best_day = self.db.get_best_day(include_archived=include_archived)
         best_total = (best_day.get('total') or 0) if best_day else 0
         if best_day and best_total > 0:
             hours = best_total / 3600
@@ -169,12 +196,15 @@ class TabStats(ctk.CTkFrame):
         else:
             self.card_best_day.value_label.configure(text="Нет данных")
 
-        self.card_counts.value_label.configure(text=f"{active_count} / {archived_count}")
-
-    def _update_top_games(self, top_n: int = 5):
+    def _update_top_games(self, top_n: int = 5, include_archived: bool = None):
+        if include_archived is None:
+            include_archived = self.include_archive_var.get() if hasattr(self, 'include_archive_var') else False
         games = self.db.get_all_games(archived=False)
-        archived_games = self.db.get_all_games(archived=True)
-        all_games = games + archived_games
+        if include_archived:
+            archived_games = self.db.get_all_games(archived=True)
+            all_games = games + archived_games
+        else:
+            all_games = games
         games_sorted = sorted(all_games, key=lambda x: x.get('total_seconds') or 0, reverse=True)[:top_n]
         if not games_sorted:
             if self.top_fig is not None:
@@ -211,11 +241,13 @@ class TabStats(ctk.CTkFrame):
         self.top_fig.tight_layout()
         self.top_canvas.draw()
 
-    def update_activity_graph(self):
+    def update_activity_graph(self, include_archived: bool = None):
+        if include_archived is None:
+            include_archived = self.include_archive_var.get() if hasattr(self, 'include_archive_var') else False
         days = int(self.period_var.get())
         end_date = date.today()
         start_date = end_date - timedelta(days=days-1)
-        sessions = self.db.get_sessions_range(start_date, end_date)
+        sessions = self.db.get_sessions_range(start_date, end_date, include_archived=include_archived)
 
         daily_seconds = {}
         for sess in sessions:
@@ -267,7 +299,9 @@ class TabStats(ctk.CTkFrame):
         self.activity_fig.tight_layout()
         self.activity_canvas.draw()
 
-    def _update_avg_session_time(self):
+    def _update_avg_session_time(self, include_archived: bool = None):
+        if include_archived is None:
+            include_archived = self.include_archive_var.get() if hasattr(self, 'include_archive_var') else False
         for widget in self.avg_table.winfo_children():
             widget.destroy()
 
@@ -277,7 +311,7 @@ class TabStats(ctk.CTkFrame):
         ctk.CTkLabel(header_frame, text="Сессий", font=("Segoe UI", 12, "bold"), width=80, anchor="center").pack(side="left")
         ctk.CTkLabel(header_frame, text="Среднее время", font=("Segoe UI", 12, "bold"), width=120, anchor="center").pack(side="left")
 
-        rows = self.db.get_games_session_stats()
+        rows = self.db.get_games_session_stats(include_archived=include_archived)
 
         if not rows:
             empty_label = ctk.CTkLabel(self.avg_table, text="Нет данных о сессиях", text_color="#666666")
@@ -286,6 +320,8 @@ class TabStats(ctk.CTkFrame):
 
         for row in rows:
             game_name = row['display_name']
+            if row.get('is_archived'):
+                game_name += " (в архиве)"
             count = row['session_count']
             avg_sec = row['avg_sec'] or 0
             avg_hours = avg_sec / 3600

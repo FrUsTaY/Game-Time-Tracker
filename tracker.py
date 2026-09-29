@@ -102,6 +102,14 @@ class GameTracker:
         self._ignored_exes: set = set()
         self._unwindowed_attempts: Dict[str, int] = {}
 
+        # Загружаем сохранённые игнорируемые процессы из БД
+        if self.db and hasattr(self.db, 'get_ignored_processes'):
+            try:
+                ignored_list = self.db.get_ignored_processes()
+                self._ignored_exes = {row['exe_name'].lower() for row in ignored_list if row.get('exe_name')}
+            except Exception as e:
+                print(f"GameTracker: ошибка загрузки игнорируемых процессов: {e}")
+
     def notify(self, title: str, message: str) -> None:
         """Отправка системного уведомления через tray или колбэк"""
         if self.on_notification:
@@ -146,8 +154,30 @@ class GameTracker:
                 return session.get('was_active', False)
 
     def ignore_exe(self, exe_name: str) -> None:
-        """Добавляет имя файла в список игнорируемых, чтобы не предлагать его снова"""
-        self._ignored_exes.add(exe_name.lower())
+        """Добавляет имя файла в список игнорируемых, чтобы не предлагать его снова, и сохраняет в БД"""
+        if not exe_name:
+            return
+        name_lower = exe_name.lower()
+        self._ignored_exes.add(name_lower)
+        if self.db and hasattr(self.db, 'add_ignored_process'):
+            try:
+                self.db.add_ignored_process(name_lower)
+            except Exception as e:
+                print(f"GameTracker: ошибка сохранения игнорируемого процесса: {e}")
+
+    def unignore_exe(self, exe_name: str) -> None:
+        """Удаляет процесс из игнорируемых в БД и памяти, чтобы его снова можно было отслеживать"""
+        if not exe_name:
+            return
+        name_lower = exe_name.lower()
+        self._ignored_exes.discard(name_lower)
+        self._seen_exes.discard(name_lower)
+        self._notified_new_exes.discard(name_lower)
+        if self.db and hasattr(self.db, 'remove_ignored_process'):
+            try:
+                self.db.remove_ignored_process(name_lower)
+            except Exception as e:
+                print(f"GameTracker: ошибка удаления игнорируемого процесса: {e}")
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():

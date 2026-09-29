@@ -74,6 +74,24 @@ class Database:
                 )
             ''')
 
+            # Таблица игнорируемых процессов
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS ignored_processes (
+                    exe_name TEXT PRIMARY KEY,
+                    ignored_at TEXT NOT NULL
+                )
+            ''')
+
+            # Таблица ожидающих уведомлений об обнаруженных играх
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS pending_notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    exe_name TEXT NOT NULL UNIQUE,
+                    exe_path TEXT,
+                    detected_at TEXT NOT NULL
+                )
+            ''')
+
             # Индексы для ускорения выборок по датам и сессиям
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions (started_at)
@@ -324,7 +342,7 @@ class Database:
             ''', (start_str, end_str))
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_sessions_range(self, start_date: date, end_date: date) -> List[Dict[str, Any]]:
+    def get_sessions_range(self, start_date: date, end_date: date, include_archived: bool = True) -> List[Dict[str, Any]]:
         """
         Возвращает все сессии в диапазоне дат (включительно)
         """
@@ -332,58 +350,146 @@ class Database:
         end_str = end_date.isoformat() + "T23:59:59.999999"
         with self.lock:
             cursor = self.conn.cursor()
-            cursor.execute('''
+            query = '''
                 SELECT s.*, g.display_name, g.exe_name
                 FROM sessions s
                 JOIN games g ON s.game_id = g.id
                 WHERE s.started_at BETWEEN ? AND ?
-                ORDER BY s.started_at
-            ''', (start_str, end_str))
+            '''
+            if not include_archived:
+                query += ' AND g.is_archived = 0'
+            query += ' ORDER BY s.started_at'
+            cursor.execute(query, (start_str, end_str))
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_longest_session(self) -> Optional[Dict[str, Any]]:
+    def get_longest_session(self, include_archived: bool = True) -> Optional[Dict[str, Any]]:
         """Возвращает самую длинную сессию с информацией об игре"""
         with self.lock:
             cursor = self.conn.cursor()
-            cursor.execute('''
+            query = '''
                 SELECT s.duration_seconds, g.display_name, s.started_at
                 FROM sessions s
                 JOIN games g ON s.game_id = g.id
                 WHERE s.duration_seconds IS NOT NULL
-                ORDER BY s.duration_seconds DESC
-                LIMIT 1
-            ''')
+            '''
+            if not include_archived:
+                query += ' AND g.is_archived = 0'
+            query += ' ORDER BY s.duration_seconds DESC LIMIT 1'
+            cursor.execute(query)
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def get_best_day(self) -> Optional[Dict[str, Any]]:
+    def get_best_day(self, include_archived: bool = True) -> Optional[Dict[str, Any]]:
         """Возвращает день с наибольшим суммарным игровым временем"""
         with self.lock:
             cursor = self.conn.cursor()
-            cursor.execute('''
+            query = '''
                 SELECT DATE(s.started_at) as day, SUM(s.duration_seconds) as total
                 FROM sessions s
+                JOIN games g ON s.game_id = g.id
                 WHERE s.duration_seconds IS NOT NULL
-                GROUP BY day
-                ORDER BY total DESC
-                LIMIT 1
-            ''')
+            '''
+            if not include_archived:
+                query += ' AND g.is_archived = 0'
+            query += ' GROUP BY day ORDER BY total DESC LIMIT 1'
+            cursor.execute(query)
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def get_games_session_stats(self) -> List[Dict[str, Any]]:
-        """Возвращает статистику сессий по неархивным играм (количество сессий и среднее время)"""
+    def get_games_session_stats(self, include_archived: bool = False) -> List[Dict[str, Any]]:
+        """Возвращает статистику сессий по играм (количество сессий и среднее время)"""
         with self.lock:
             cursor = self.conn.cursor()
-            cursor.execute('''
-                SELECT g.display_name, COUNT(s.id) as session_count, AVG(s.duration_seconds) as avg_sec
+            where_clause = "WHERE s.duration_seconds IS NOT NULL"
+            if not include_archived:
+                where_clause += " AND g.is_archived = 0"
+            cursor.execute(f'''
+                SELECT g.display_name, g.is_archived, COUNT(s.id) as session_count, AVG(s.duration_seconds) as avg_sec
                 FROM games g
                 LEFT JOIN sessions s ON g.id = s.game_id
-                WHERE g.is_archived = 0 AND s.duration_seconds IS NOT NULL
+                {where_clause}
                 GROUP BY g.id
                 ORDER BY avg_sec DESC
             ''')
             return [dict(row) for row in cursor.fetchall()]
+
+    # ---------- Игнорируемые процессы ----------
+
+    def add_ignored_process(self, exe_name: str) -> None:
+        """Добавляет имя исполняемого файла в список игнорируемых"""
+        if not exe_name:
+            return
+        with self.lock:
+            cursor = self.conn.cursor()
+            now = self._get_current_datetime()
+            cursor.execute('''
+                INSERT OR REPLACE INTO ignored_processes (exe_name, ignored_at)
+                VALUES (?, ?)
+            ''', (exe_name.lower(), now))
+            self.conn.commit()
+
+    def remove_ignored_process(self, exe_name: str) -> None:
+        """Удаляет исполняемый файл из списка игнорируемых"""
+        if not exe_name:
+            return
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM ignored_processes WHERE exe_name = ?", (exe_name.lower(),))
+            self.conn.commit()
+
+    def get_ignored_processes(self) -> List[Dict[str, Any]]:
+        """Возвращает список всех игнорируемых процессов"""
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM ignored_processes ORDER BY exe_name ASC")
+            return [dict(row) for row in cursor.fetchall()]
+
+    def is_process_ignored(self, exe_name: str) -> bool:
+        """Проверяет, находится ли процесс в списке игнорируемых"""
+        if not exe_name:
+            return False
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT 1 FROM ignored_processes WHERE exe_name = ?", (exe_name.lower(),))
+            return cursor.fetchone() is not None
+
+    # ---------- Ожидающие уведомления ----------
+
+    def add_pending_notification(self, exe_name: str, exe_path: Optional[str] = None) -> None:
+        """Сохраняет ожидающее уведомление о новом процессе"""
+        if not exe_name:
+            return
+        with self.lock:
+            cursor = self.conn.cursor()
+            now = self._get_current_datetime()
+            cursor.execute('''
+                INSERT OR REPLACE INTO pending_notifications (exe_name, exe_path, detected_at)
+                VALUES (?, ?, ?)
+            ''', (exe_name.lower(), exe_path, now))
+            self.conn.commit()
+
+    def remove_pending_notification(self, exe_name: str) -> None:
+        """Удаляет уведомление для процесса"""
+        if not exe_name:
+            return
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM pending_notifications WHERE exe_name = ?", (exe_name.lower(),))
+            self.conn.commit()
+
+    def get_pending_notifications(self) -> List[Dict[str, Any]]:
+        """Возвращает все ожидающие уведомления"""
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM pending_notifications ORDER BY id DESC")
+            return [dict(row) for row in cursor.fetchall()]
+
+    def clear_pending_notifications(self) -> None:
+        """Очищает все ожидающие уведомления"""
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM pending_notifications")
+            self.conn.commit()
 
     # ---------- Настройки ----------
 
