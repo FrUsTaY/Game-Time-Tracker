@@ -297,13 +297,13 @@ class GameTracker:
                     self._seen_exes.add(exe_name)
                     if exe_name not in self._notified_new_exes:
                         self._notified_new_exes.add(exe_name)
-                        clean_name = os.path.splitext(exe_name)[0].replace('_', ' ').replace('-', ' ').title()
-                        self.notify("GameTimeTracker", f"🎮 Обнаружена игра: {clean_name} ({exe_name})! Нажмите для добавления")
                         if self.on_game_detected:
                             try:
                                 self.on_game_detected(exe_name, proc_data.get('exe_path'))
                             except Exception as e:
                                 print(f"GameTracker: ошибка в on_game_detected: {e}")
+                        clean_name = os.path.splitext(exe_name)[0].replace('_', ' ').replace('-', ' ').title()
+                        self.notify("GameTimeTracker", f"🎮 Обнаружена игра: {clean_name} ({exe_name})! Нажмите для добавления")
                 else:
                     # Фоновый процесс без окна (или окно ещё не создано)
                     attempts = self._unwindowed_attempts.get(exe_name, 0) + 1

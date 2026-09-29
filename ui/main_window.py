@@ -26,6 +26,7 @@ class NotificationsDialog(ctk.CTkToplevel):
         self.geometry("540x420")
         self.minsize(450, 300)
         self.resizable(True, True)
+        self.transient(parent)
 
         self.withdraw()
         self.update_idletasks()
@@ -36,10 +37,19 @@ class NotificationsDialog(ctk.CTkToplevel):
         except Exception:
             pass
         self.deiconify()
+        self.lift()
         self.focus_force()
+        self.after(20, self.lift)
+        self.after(50, self.focus_force)
 
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build_ui()
         self.refresh()
+
+    def _on_close(self):
+        if hasattr(self.master, '_notifications_window'):
+            self.master._notifications_window = None
+        self.destroy()
 
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
@@ -80,7 +90,7 @@ class NotificationsDialog(ctk.CTkToplevel):
         close_btn = ctk.CTkButton(
             bottom_frame,
             text="Закрыть",
-            command=self.destroy,
+            command=self._on_close,
             fg_color="#00d4ff",
             hover_color="#0099cc",
             text_color="#0d0d0d",
@@ -177,7 +187,7 @@ class NotificationsDialog(ctk.CTkToplevel):
             skip_btn.pack(side="right")
 
     def _add(self, exe_name, exe_path):
-        self.destroy()
+        self._on_close()
         self.on_add_game(exe_name, exe_path)
 
     def _ignore(self, exe_name):
@@ -404,8 +414,15 @@ class MainWindow(ctk.CTk):
             self.state("normal")
         except Exception:
             pass
-        self.lift()
-        self.focus_force()
+        try:
+            self.attributes("-topmost", True)
+            self.update_idletasks()
+            self.lift()
+            self.focus_force()
+            self.after(50, lambda: self.attributes("-topmost", False))
+        except Exception:
+            self.lift()
+            self.focus_force()
 
     def update_notifications_badge(self):
         """Обновляет бейдж на кнопке уведомлений."""
@@ -458,6 +475,7 @@ class MainWindow(ctk.CTk):
         if self._notifications_window is not None:
             try:
                 if self._notifications_window.winfo_exists():
+                    self._notifications_window.deiconify()
                     self._notifications_window.lift()
                     self._notifications_window.focus_force()
                     return
@@ -470,10 +488,17 @@ class MainWindow(ctk.CTk):
             on_add_game=self.prompt_add_new_game,
             on_remove_notification=self.remove_pending_notification
         )
+        try:
+            self._notifications_window.lift()
+            self._notifications_window.focus_force()
+        except Exception:
+            pass
 
     def open_detected_game_from_notification(self):
         """Вызывается только при клике пользователя по системному уведомлению."""
         self.show_window()
+        if self.db and hasattr(self.db, 'get_pending_notifications'):
+            self.pending_notifications = self.db.get_pending_notifications()
         if self.pending_notifications:
             latest = self.pending_notifications[0]
             self.prompt_add_new_game(latest['exe_name'], latest.get('exe_path'))
@@ -489,6 +514,16 @@ class MainWindow(ctk.CTk):
 
         games_tab = self.tabs_cache.get("games")
 
+        if hasattr(self, '_add_game_dialog') and self._add_game_dialog is not None:
+            try:
+                if self._add_game_dialog.winfo_exists():
+                    self._add_game_dialog.deiconify()
+                    self._add_game_dialog.lift()
+                    self._add_game_dialog.focus_force()
+                    return
+            except Exception:
+                pass
+
         def on_add(exe, title, path):
             if games_tab and hasattr(games_tab, 'add_detected_game'):
                 games_tab.add_detected_game(exe, title, path)
@@ -497,7 +532,7 @@ class MainWindow(ctk.CTk):
         def on_ignore(exe):
             self.remove_pending_notification(exe)
 
-        AddNewGameDialog(
+        self._add_game_dialog = AddNewGameDialog(
             self,
             exe_name=exe_name,
             exe_path=exe_path,
@@ -505,6 +540,11 @@ class MainWindow(ctk.CTk):
             on_confirm=on_add,
             on_ignore=on_ignore
         )
+        try:
+            self._add_game_dialog.lift()
+            self._add_game_dialog.focus_force()
+        except Exception:
+            pass
 
     def confirm_exit(self):
         """Подтверждение выхода из приложения."""

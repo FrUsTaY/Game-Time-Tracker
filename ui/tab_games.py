@@ -30,7 +30,7 @@ class AddNewGameDialog(ctk.CTkToplevel):
         self.title("🎮 Обнаружена новая игра!")
         self.geometry("500x320")
         self.resizable(False, False)
-        self.grab_set()
+        self.transient(parent)
 
         # Центрирование окна
         self.withdraw()
@@ -42,7 +42,14 @@ class AddNewGameDialog(ctk.CTkToplevel):
         except Exception:
             pass
         self.deiconify()
+        self.lift()
         self.focus_force()
+        try:
+            self.grab_set()
+        except Exception:
+            pass
+        self.after(20, self.lift)
+        self.after(50, self.focus_force)
 
         self._build_ui()
 
@@ -130,7 +137,14 @@ class AddFromProcessesDialog(ctk.CTkToplevel):
 
         self.title("Добавить игру из запущенных")
         self.geometry("750x550")
-        self.grab_set()
+        self.transient(parent)
+        self.lift()
+        self.focus_force()
+        try:
+            self.grab_set()
+        except Exception:
+            pass
+        self.after(20, self.lift)
 
         # Поле поиска и переключатель фоновых процессов
         search_frame = ctk.CTkFrame(self, fg_color="transparent")

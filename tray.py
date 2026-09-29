@@ -73,20 +73,37 @@ class SystemTray:
 
     def _run(self):
         self.icon = pystray.Icon("GameTimeTracker", self._image, "GameTimeTracker", self._setup_menu())
-        if hasattr(self.icon, '_on_notify'):
-            orig_on_notify = self.icon._on_notify
+        orig_on_notify = getattr(self.icon, '_on_notify', None)
 
-            def custom_on_notify(wparam, lparam):
-                # 1029 (0x0405) = NIN_BALLOONUSERCLICK в Windows
-                if lparam == 1029:
-                    if self.on_notification_click:
-                        try:
-                            self.on_notification_click()
-                        except Exception as e:
-                            print(f"SystemTray: ошибка в on_notification_click: {e}")
-                return orig_on_notify(wparam, lparam)
+        def custom_on_notify(wparam, lparam):
+            # 1029 (0x0405) = NIN_BALLOONUSERCLICK в Windows
+            # Проверяем как lparam, так и LOWORD(lparam) для различных версий Shell_NotifyIcon
+            event_code = (lparam & 0xFFFF) if isinstance(lparam, int) else lparam
+            if event_code == 1029 or lparam == 1029:
+                if self.on_notification_click:
+                    try:
+                        self.on_notification_click()
+                    except Exception as e:
+                        print(f"SystemTray: ошибка в on_notification_click: {e}")
+            if orig_on_notify:
+                try:
+                    return orig_on_notify(wparam, lparam)
+                except Exception:
+                    return 0
+            return 0
 
-            self.icon._on_notify = custom_on_notify
+        self.icon._on_notify = custom_on_notify
+        if hasattr(self.icon, '_message_handlers'):
+            for k, handler in list(self.icon._message_handlers.items()):
+                if getattr(handler, '__name__', '') == '_on_notify':
+                    self.icon._message_handlers[k] = custom_on_notify
+            try:
+                import pystray._win32 as pystray_win32
+                if hasattr(pystray_win32, 'win32') and hasattr(pystray_win32.win32, 'WM_NOTIFY'):
+                    self.icon._message_handlers[pystray_win32.win32.WM_NOTIFY] = custom_on_notify
+            except Exception:
+                pass
+
         self.icon.run()
 
     def start(self):

@@ -21,15 +21,18 @@ class SettingsWindow(ctk.CTkToplevel):
         self.title("Настройки GameTimeTracker")
         self.geometry("600x550")
         self.resizable(False, False)
+        self.transient(parent)
         # Скрываем окно до позиционирования
         self.withdraw()
         self.update_idletasks()
         x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
         y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
         self.geometry(f"+{x}+{y}")
+        self.deiconify()   # показываем окно уже в центре
+        self.lift()
         self.grab_set()
         self.focus_force()
-        self.deiconify()   # показываем окно уже в центре
+        self.after(20, self.lift)
 
         self.vars = {}
         self._build_ui()
