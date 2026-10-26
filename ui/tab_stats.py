@@ -108,7 +108,7 @@ class TabStats(ctk.CTkFrame):
 
         # Топ игр
         self.top_label = ctk.CTkLabel(
-            self.main_canvas, text="🏆 Топ игр по времени",
+            self.main_canvas, text="🏆 Топ игр за выбранный период",
             font=("Consolas", 16, "bold"), text_color="#00d4ff"
         )
         self.top_label.grid(row=2, column=0, sticky="w", pady=(20, 5))
@@ -243,13 +243,14 @@ class TabStats(ctk.CTkFrame):
     def _update_top_games(self, top_n: int = 5, include_archived: bool = None):
         if include_archived is None:
             include_archived = self.include_archive_var.get() if hasattr(self, 'include_archive_var') else False
-        games = self.db.get_all_games(archived=False)
-        if include_archived:
-            archived_games = self.db.get_all_games(archived=True)
-            all_games = games + archived_games
-        else:
-            all_games = games
-        games_sorted = sorted(all_games, key=lambda x: x.get('total_seconds') or 0, reverse=True)[:top_n]
+        days = int(self.period_var.get()) if hasattr(self, 'period_var') else 30
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days - 1)
+        games_sorted = self.db.get_top_games(
+            start_date, end_date, limit=top_n, include_archived=include_archived
+        )
+        for game in games_sorted:
+            game['total_seconds'] = game['seconds']
         if not games_sorted:
             if self.top_fig is not None:
                 self.top_fig.clear()
@@ -280,7 +281,7 @@ class TabStats(ctk.CTkFrame):
             ax.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height()/2,
                     f'{h:.1f} ч', va='center', fontsize=9, color='#e0e0e0')
         ax.set_xlabel('Часы', color='#e0e0e0')
-        ax.set_title('Топ игр по времени', color='#00d4ff')
+        ax.set_title(f'Топ игр за {days} дн.', color='#00d4ff')
         ax.invert_yaxis()
         self.top_fig.tight_layout()
         self.top_canvas.draw()

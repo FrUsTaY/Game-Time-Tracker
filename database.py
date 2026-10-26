@@ -826,6 +826,47 @@ class Database:
                     day_map[name] = day_map.get(name, 0) + seconds
         return result
 
+    def get_top_games(self, start_date: date, end_date: date, limit: int = 5,
+                      include_archived: bool = False) -> List[Dict[str, Any]]:
+        """
+        Возвращает топ игр по времени **за указанный период**.
+
+        В отличие от сортировки `games.total_seconds` (время за всё время),
+        здесь учитываются только сессии, попавшие в диапазон, причём сессии,
+        пересекающие полночь, делятся по дням корректно.
+
+        Returns:
+            Список словарей с id, display_name, exe_name, is_archived,
+            seconds и share (доля от суммарного времени периода, 0..1),
+            отсортированный по убыванию времени.
+        """
+        totals: Dict[int, Dict[str, Any]] = {}
+        if end_date < start_date:
+            return []
+        for session in self._get_sessions_overlapping(start_date, end_date, include_archived):
+            start, end, duration = self._session_bounds(session)
+            in_period = sum(
+                seconds for day, seconds in self._split_interval_by_day(start, end, duration).items()
+                if start_date <= day <= end_date
+            )
+            if in_period <= 0:
+                continue
+            game_id = session['game_id']
+            entry = totals.setdefault(game_id, {
+                'id': game_id,
+                'display_name': session.get('display_name') or session.get('exe_name'),
+                'exe_name': session.get('exe_name'),
+                'is_archived': bool(session.get('is_archived')),
+                'seconds': 0,
+            })
+            entry['seconds'] += in_period
+
+        overall = sum(entry['seconds'] for entry in totals.values())
+        result = sorted(totals.values(), key=lambda item: item['seconds'], reverse=True)
+        for entry in result:
+            entry['share'] = (entry['seconds'] / overall) if overall else 0.0
+        return result[:max(limit, 1)] if limit else result
+
     def get_day_breakdown(self, target_date: date,
                           include_archived: bool = True) -> Dict[str, int]:
         """Возвращает разбивку игрового времени за день по названиям игр."""

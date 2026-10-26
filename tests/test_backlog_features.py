@@ -201,6 +201,65 @@ class TestWeeklyDigest(unittest.TestCase):
         self.assertIn("активности не было", message)
 
 
+class TestTopGamesByPeriod(unittest.TestCase):
+    def setUp(self):
+        self.db = Database(":memory:")
+        self.old_game = self.db.add_game("old.exe", "Old Favorite")
+        self.new_game = self.db.add_game("new.exe", "New Favorite")
+        self.archived = self.db.add_game("arc.exe", "Archived")
+        self.db.archive_game(self.archived)
+
+    def tearDown(self):
+        self.db.close()
+
+    def _session(self, game_id: int, started: datetime, seconds: int, ended=None) -> None:
+        end = ended or (started + timedelta(seconds=seconds))
+        with self.db.lock:
+            self.db.conn.execute(
+                "INSERT INTO sessions (game_id, started_at, ended_at, duration_seconds) "
+                "VALUES (?, ?, ?, ?)",
+                (game_id, started.isoformat(), end.isoformat(), seconds),
+            )
+            self.db.conn.commit()
+
+    def test_period_filter_ignores_old_sessions(self):
+        today = date.today()
+        # Old Favorite играли много, но давно
+        self._session(self.old_game, datetime.combine(today - timedelta(days=100), datetime.min.time()), 36000)
+        self._session(self.new_game, datetime.combine(today, datetime.min.time()), 1800)
+
+        recent = self.db.get_top_games(today - timedelta(days=6), today)
+        self.assertEqual([g['display_name'] for g in recent], ["New Favorite"])
+        self.assertAlmostEqual(recent[0]['share'], 1.0)
+
+        all_time = self.db.get_top_games(today - timedelta(days=365), today)
+        self.assertEqual([g['display_name'] for g in all_time], ["Old Favorite", "New Favorite"])
+
+    def test_archived_games_are_optional(self):
+        today = date.today()
+        self._session(self.archived, datetime.combine(today, datetime.min.time()), 600)
+        self.assertEqual(self.db.get_top_games(today, today), [])
+        names = [g['display_name'] for g in self.db.get_top_games(today, today, include_archived=True)]
+        self.assertEqual(names, ["Archived"])
+
+    def test_overnight_session_is_split(self):
+        today = date.today()
+        start = datetime.combine(today - timedelta(days=1), datetime.min.time()).replace(hour=23, minute=30)
+        self._session(self.new_game, start, 3600)  # 30 мин вчера + 30 мин сегодня
+        self.assertEqual(self.db.get_top_games(today, today)[0]['seconds'], 1800)
+        self.assertEqual(self.db.get_top_games(today - timedelta(days=1), today)[0]['seconds'], 3600)
+
+    def test_limit_and_empty_period(self):
+        today = date.today()
+        self._session(self.old_game, datetime.combine(today, datetime.min.time()), 600)
+        self._session(self.new_game, datetime.combine(today, datetime.min.time()), 1200)
+        self.assertEqual(len(self.db.get_top_games(today, today, limit=1)), 1)
+        self.assertEqual(self.db.get_top_games(today, today, limit=1)[0]['display_name'], "New Favorite")
+        future = today + timedelta(days=10)
+        self.assertEqual(self.db.get_top_games(future, future), [])
+        self.assertEqual(self.db.get_top_games(today, today - timedelta(days=1)), [])
+
+
 class TestIntegrityCheck(unittest.TestCase):
     def test_fresh_database_is_ok(self):
         db = Database(":memory:")
