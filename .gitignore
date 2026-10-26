@@ -30,3 +30,6 @@ Thumbs.db
 
 # Arena/локальные артефакты
 .arena/
+
+# Локально скачанный/собранный exe (публикуется в build/win-exe и Releases)
+.exe/
