@@ -5,6 +5,7 @@
 [![CustomTkinter](https://img.shields.io/badge/CustomTkinter-5.2.0-blueviolet)](https://github.com/TomSchimansky/CustomTkinter)
 [![CI](https://github.com/FrUsTaY/Game-Time-Tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/FrUsTaY/Game-Time-Tracker/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](AUDIT.md)
+[![Release](https://img.shields.io/github/v/release/FrUsTaY/Game-Time-Tracker?label=release)](https://github.com/FrUsTaY/Game-Time-Tracker/releases/latest)
 
 **GameTimeTracker** — это легковесное и стильное приложение на Python для автоматического отслеживания времени, проведенного в играх. Приложение работает в фоновом режиме, сидит в системном трее и аккуратно собирает статистику вашей игровой активности.
 
@@ -47,8 +48,8 @@
 Вы можете использовать GameTimeTracker двумя способами: запустить собранный `.exe` файл (просто и быстро) или запустить его из исходного кода.
 
 ### Способ 1: Использование скомпилированного .exe (Рекомендуется для обычных пользователей)
-1. Скачайте последнюю версию программы из раздела **Releases**.
-2. Распакуйте архив в любую удобную папку.
+1. Скачайте `GameTimeTracker.exe` из [последнего релиза](https://github.com/FrUsTaY/Game-Time-Tracker/releases/latest) — один файл, установка не нужна.
+2. Положите его в любую удобную папку (например, `.exe\`).
 3. Запустите `GameTimeTracker.exe` (или `run_game_tracker.bat`).
 4. *Готово!* Добавляйте игры через интерфейс и наслаждайтесь сбором статистики. Приложение может автоматически добавляться в автозапуск Windows (включается в настройках).
 
@@ -83,6 +84,23 @@
    ```
 3. Дождитесь окончания процесса. Готовый `.exe` файл будет находиться в папке `dist/GameTimeTracker.exe`.
    Параметры сборки хранятся в `GameTimeTracker.spec` (единый источник истины), `build.py` использует его.
+
+## 📦 Сборка релизного .exe
+
+PyInstaller **не умеет кросс-компиляцию** — Windows-бинарник собирается только на Windows.
+
+- **Автоматически:** workflow [`Сборка .exe`](.github/workflows/release.yml) собирает `GameTimeTracker.exe`
+  на `windows-latest` и:
+  - по тегу `v*` — публикует GitHub Release с вложенным `.exe`;
+  - по ручному запуску (`workflow_dispatch`) — дополнительно коммитит бинарник в служебную ветку
+    [`build/win-exe`](https://github.com/FrUsTaY/Game-Time-Tracker/tree/build/win-exe) (папка `.exe/`),
+    чтобы файл можно было забрать без Releases.
+- **Локально (на Windows):**
+  ```bat
+  pip install -r requirements-dev.txt
+  python build.py
+  ```
+  Результат — `dist\GameTimeTracker.exe` (onefile, без консольного окна).
 
 ## 🧪 Разработка и тесты
 
