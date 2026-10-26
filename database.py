@@ -767,6 +767,12 @@ class Database:
             end = start + timedelta(seconds=duration)
         return start, end, duration
 
+    def _has_sessions(self) -> bool:
+        """Есть ли в базе хотя бы одна запись о сессии."""
+        with self.lock:
+            row = self.conn.execute("SELECT 1 FROM sessions LIMIT 1").fetchone()
+        return row is not None
+
     def _get_sessions_overlapping(self, start_date: date, end_date: date,
                                   include_archived: bool = True) -> List[Dict[str, Any]]:
         """Возвращает сессии, которые хотя бы частично попадают в диапазон дат."""
@@ -843,6 +849,26 @@ class Database:
         totals: Dict[int, Dict[str, Any]] = {}
         if end_date < start_date:
             return []
+        if not self._has_sessions():
+            # База без истории сессий (старые версии / ручные записи): период
+            # посчитать не из чего, показываем суммарное время по играм.
+            games = self.get_all_games(archived=False)
+            if include_archived:
+                games += self.get_all_games(archived=True)
+            legacy = [
+                {
+                    'id': g['id'], 'display_name': g['display_name'],
+                    'exe_name': g['exe_name'], 'is_archived': bool(g.get('is_archived')),
+                    'seconds': int(g.get('total_seconds') or 0),
+                }
+                for g in games if int(g.get('total_seconds') or 0) > 0
+            ]
+            overall = sum(entry['seconds'] for entry in legacy)
+            result = sorted(legacy, key=lambda item: item['seconds'], reverse=True)
+            for entry in result:
+                entry['share'] = (entry['seconds'] / overall) if overall else 0.0
+            return result[:max(limit, 1)] if limit else result
+
         for session in self._get_sessions_overlapping(start_date, end_date, include_archived):
             start, end, duration = self._session_bounds(session)
             in_period = sum(
