@@ -70,7 +70,7 @@ jobs:
           retention-days: 30
 
       - name: Публикация exe в ветку build/win-exe
-        if: github.event_name == 'workflow_dispatch' && inputs.commit_binary
+        if: github.event_name == 'push' || inputs.commit_binary
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
