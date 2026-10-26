@@ -51,14 +51,14 @@ jobs:
       - name: Установка минимальных зависимостей
         run: |
           python -m pip install --upgrade pip
-          pip install pytest psutil Pillow
+          pip install pytest psutil Pillow pytest-github-actions-annotate-failures
 
       - name: Проверка импорта ядра без Windows-модулей
         run: python -c "import database, settings, tracker, utils, logging_setup; print('core imports OK')"
 
       - name: Тесты базы данных, настроек и новой аналитики
         run: >
-          pytest -q
+          pytest -q -ra
           tests/test_database.py
           tests/test_settings.py
           tests/test_new_features.py
