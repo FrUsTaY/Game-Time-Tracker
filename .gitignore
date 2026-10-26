@@ -32,4 +32,6 @@ Thumbs.db
 .arena/
 
 # Локально скачанный/собранный exe (публикуется в build/win-exe и Releases)
-.exe/
+.exe/*
+# ...кроме описания сборки: оно полезно в репозитории
+!.exe/README.txt
