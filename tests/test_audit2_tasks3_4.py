@@ -155,7 +155,7 @@ class TestAudit2Task4DriftAndIdleTasks(unittest.TestCase):
                  patch('psutil.process_iter', return_value=[]):
 
                 # Прогоняем шаги через прямое обновление логики
-                for step in range(1, 11):
+                for _step in range(1, 11):
                     current_time += 1.07
                     with patch('time.monotonic', return_value=current_time):
                         # Вызываем _check_processes с контролируемым временем

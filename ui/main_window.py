@@ -387,7 +387,7 @@ class MainWindow(ctk.CTk):
                 return
 
         # Подсветка кнопки
-        for text, (btn, btn_key) in self.nav_buttons.items():
+        for _text, (btn, btn_key) in self.nav_buttons.items():
             if btn_key == key:
                 btn.configure(fg_color="#2a2a4e", text_color="#00d4ff")
             else:

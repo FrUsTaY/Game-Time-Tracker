@@ -83,7 +83,7 @@ target-version = "py38"
 exclude = ["build", "dist", "assets"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
+select = ["E", "F", "W", "I", "B"]
 ignore = [
     "E501",  # длина строк контролируется вручную (русские строки/подсказки)
 ]
