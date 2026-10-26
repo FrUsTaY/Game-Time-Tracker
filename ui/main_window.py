@@ -1,16 +1,16 @@
-import customtkinter as ctk
-from PIL import Image, ImageTk
 import os
-import sys
 import traceback
 
-from ui.tab_games import TabGames
-from ui.tab_calendar import TabCalendar
-from ui.tab_archive import TabArchive
-from ui.tab_stats import TabStats
-from ui.tab_about import TabAbout
+import customtkinter as ctk
+from PIL import Image, ImageTk
+
 from ui.settings_window import SettingsWindow
-from utils import get_base_dir, resource_path
+from ui.tab_about import TabAbout
+from ui.tab_archive import TabArchive
+from ui.tab_calendar import TabCalendar
+from ui.tab_games import TabGames
+from ui.tab_stats import TabStats
+from utils import resource_path
 
 
 class NotificationsDialog(ctk.CTkToplevel):
@@ -387,7 +387,7 @@ class MainWindow(ctk.CTk):
                 return
 
         # Подсветка кнопки
-        for text, (btn, btn_key) in self.nav_buttons.items():
+        for _text, (btn, btn_key) in self.nav_buttons.items():
             if btn_key == key:
                 btn.configure(fg_color="#2a2a4e", text_color="#00d4ff")
             else:
@@ -397,6 +397,9 @@ class MainWindow(ctk.CTk):
         if hasattr(self, '_settings_window') and self._settings_window is not None:
             try:
                 if self._settings_window.winfo_exists():
+                    # списки игр/игнорируемых могли измениться, пока окно было скрыто
+                    if hasattr(self._settings_window, 'refresh_dynamic_sections'):
+                        self._settings_window.refresh_dynamic_sections()
                     self._settings_window.lift()
                     self._settings_window.focus_force()
                     return
@@ -406,7 +409,6 @@ class MainWindow(ctk.CTk):
 
     def hide_to_tray(self):
         self.withdraw()
-        print("GameTimeTracker продолжает работать в фоне")
 
     def show_window(self):
         self.deiconify()

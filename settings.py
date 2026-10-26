@@ -3,11 +3,28 @@
 Использует реестр Windows для автозапуска и базу данных для остальных настроек.
 """
 
-import winreg
-import sys
 import os
+import sys
+from typing import Optional
+
+try:  # winreg доступен только в Windows — это позволяет запускать тесты на Linux/CI
+    import winreg
+    WINREG_AVAILABLE = True
+except ImportError:  # pragma: no cover - зависит от платформы
+    winreg = None
+    WINREG_AVAILABLE = False
+
 from database import Database
 from utils import get_base_dir
+
+# Значения по умолчанию для новых настроек (используются в UI и трекере)
+DEFAULT_PAUSE_WHEN_IDLE = False
+DEFAULT_IDLE_THRESHOLD_MINUTES = 5
+DEFAULT_DAILY_LIMIT_ENABLED = False
+DEFAULT_DAILY_LIMIT_MINUTES = 180
+DEFAULT_BACKUP_ON_STARTUP = True
+DEFAULT_BACKUP_KEEP = 7
+DEFAULT_WEEKLY_SUMMARY_ENABLED = True
 
 
 class AppSettings:
@@ -16,6 +33,13 @@ class AppSettings:
     def __init__(self, db: Database):
         self.db = db
         self._cache = {}  # Простой кеш на время жизни объекта
+
+    def invalidate_cache(self, key: str = None) -> None:
+        """Сбрасывает кэш настроек (полностью или для одного ключа)."""
+        if key is None:
+            self._cache.clear()
+        else:
+            self._cache.pop(key, None)
 
     def _get_bool(self, key: str, default: bool) -> bool:
         """Получить булево значение из БД (с кэшированием)"""
@@ -50,6 +74,20 @@ class AppSettings:
             self._cache[key] = default
             return default
 
+    def _get_str(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        """Получить строковое значение из БД (с кэшированием)."""
+        if key in self._cache:
+            return self._cache[key]
+        val = self.db.get_setting(key)
+        res = default if val is None else val
+        self._cache[key] = res
+        return res
+
+    def _set_str(self, key: str, value: Optional[str]) -> None:
+        """Сохранить строковое значение в БД."""
+        self.db.set_setting(key, '' if value is None else str(value))
+        self._cache[key] = value
+
     def _set_int(self, key: str, value: int) -> None:
         """Сохранить целочисленное значение в БД"""
         self.db.set_setting(key, str(value))
@@ -59,6 +97,9 @@ class AppSettings:
 
     def enable_autostart(self) -> None:
         """Добавляет приложение в автозапуск Windows (HKCU)"""
+        if winreg is None:
+            print("Автозапуск доступен только в Windows")
+            return
         try:
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
@@ -82,6 +123,8 @@ class AppSettings:
 
     def disable_autostart(self) -> None:
         """Удаляет приложение из автозапуска"""
+        if winreg is None:
+            return
         try:
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
@@ -99,6 +142,8 @@ class AppSettings:
 
     def is_autostart_enabled(self) -> bool:
         """Проверяет, включён ли автозапуск"""
+        if winreg is None:
+            return False
         try:
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
@@ -173,6 +218,96 @@ class AppSettings:
         if value < 1:
             value = 1
         self._set_int("long_session_minutes", value)
+
+    # ----- Пауза при бездействии (AFK) -----
+
+    @property
+    def pause_when_idle(self) -> bool:
+        """Не учитывать время, если пользователь неактивен (нет ввода мыши/клавиатуры)."""
+        return self._get_bool("pause_when_idle", DEFAULT_PAUSE_WHEN_IDLE)
+
+    @pause_when_idle.setter
+    def pause_when_idle(self, value: bool) -> None:
+        self._set_bool("pause_when_idle", value)
+
+    @property
+    def idle_threshold_minutes(self) -> int:
+        """Порог бездействия в минутах, после которого трекинг приостанавливается."""
+        return self._get_int("idle_threshold_minutes", DEFAULT_IDLE_THRESHOLD_MINUTES)
+
+    @idle_threshold_minutes.setter
+    def idle_threshold_minutes(self, value: int) -> None:
+        if value < 1:
+            value = 1
+        self._set_int("idle_threshold_minutes", value)
+
+    # ----- Дневной лимит игрового времени -----
+
+    @property
+    def daily_limit_enabled(self) -> bool:
+        """Включён ли дневной лимит игрового времени."""
+        return self._get_bool("daily_limit_enabled", DEFAULT_DAILY_LIMIT_ENABLED)
+
+    @daily_limit_enabled.setter
+    def daily_limit_enabled(self, value: bool) -> None:
+        self._set_bool("daily_limit_enabled", value)
+
+    @property
+    def daily_limit_minutes(self) -> int:
+        """Дневной лимит игрового времени в минутах."""
+        return self._get_int("daily_limit_minutes", DEFAULT_DAILY_LIMIT_MINUTES)
+
+    @daily_limit_minutes.setter
+    def daily_limit_minutes(self, value: int) -> None:
+        if value < 5:
+            value = 5
+        self._set_int("daily_limit_minutes", value)
+
+    # ----- Еженедельная сводка -----
+
+    @property
+    def weekly_summary_enabled(self) -> bool:
+        """Отправлять еженедельную сводку игровой активности."""
+        return self._get_bool("weekly_summary_enabled", DEFAULT_WEEKLY_SUMMARY_ENABLED)
+
+    @weekly_summary_enabled.setter
+    def weekly_summary_enabled(self, value: bool) -> None:
+        self._set_bool("weekly_summary_enabled", value)
+
+    @property
+    def last_weekly_summary_date(self) -> Optional[str]:
+        """Дата последней отправленной еженедельной сводки (ISO) или None."""
+        value = self._get_str("last_weekly_summary_date")
+        return value or None
+
+    @last_weekly_summary_date.setter
+    def last_weekly_summary_date(self, value: Optional[str]) -> None:
+        self._set_str("last_weekly_summary_date", value)
+
+    # ----- Резервное копирование -----
+
+    @property
+    def backup_on_startup(self) -> bool:
+        """Создавать резервную копию базы при каждом запуске приложения."""
+        return self._get_bool("backup_on_startup", DEFAULT_BACKUP_ON_STARTUP)
+
+    @backup_on_startup.setter
+    def backup_on_startup(self, value: bool) -> None:
+        self._set_bool("backup_on_startup", value)
+
+    @property
+    def backup_keep(self) -> int:
+        """Сколько последних автоматических резервных копий хранить."""
+        value = self._get_int("backup_keep", DEFAULT_BACKUP_KEEP)
+        if value < 1:
+            value = 1
+        return value
+
+    @backup_keep.setter
+    def backup_keep(self, value: int) -> None:
+        if value < 1:
+            value = 1
+        self._set_int("backup_keep", value)
 
     # ----- Сохранение всех настроек (удобно при закрытии окна) -----
     def save_all(self) -> None:

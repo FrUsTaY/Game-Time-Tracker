@@ -1,7 +1,8 @@
-import unittest
-import sys
-import os
 import ctypes
+import os
+import sys
+import unittest
+
 from PIL import Image
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -243,6 +244,7 @@ class TestMainWindowExit(unittest.TestCase):
 
     def test_quit_app_calls_on_exit(self):
         from unittest.mock import MagicMock
+
         from ui.main_window import MainWindow
 
         mock_exit = MagicMock()

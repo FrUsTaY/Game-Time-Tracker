@@ -2,18 +2,25 @@
 tab_games.py — вкладка «Мои игры» для GameTimeTracker.
 """
 
-import customtkinter as ctk
-from tkinter import filedialog, messagebox
 import os
 from datetime import datetime
-from typing import Dict, Optional, List
-import win32gui
-import win32process
+from tkinter import filedialog, messagebox
+from typing import Dict, List, Optional
 
-from ui.widgets import GameCard, SectionTitle
+import customtkinter as ctk
+
+try:  # pywin32 доступен только в Windows (нужен для заголовков окон процессов)
+    import win32gui
+    import win32process
+    WIN32_AVAILABLE = True
+except ImportError:  # pragma: no cover - зависит от платформы
+    win32gui = win32process = None
+    WIN32_AVAILABLE = False
+
 from database import Database
-from tracker import GameTracker
 from settings import AppSettings
+from tracker import GameTracker
+from ui.widgets import GameCard, SectionTitle
 from utils import get_base_dir
 
 
@@ -199,6 +206,9 @@ class AddFromProcessesDialog(ctk.CTkToplevel):
         # Собираем заголовки окон для всех PID за один быстрый проход EnumWindows
         pid_to_title = {}
         try:
+            if not WIN32_AVAILABLE:
+                raise RuntimeError("pywin32 недоступен")
+
             def enum_cb(hwnd, _):
                 if win32gui.IsWindowVisible(hwnd):
                     _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
@@ -260,7 +270,7 @@ class AddFromProcessesDialog(ctk.CTkToplevel):
 
             title_suffix = f" — {proc['window_title'][:50]}" if proc.get('window_title') else " (без окна)"
             cb = ctk.CTkCheckBox(
-                self.frame, 
+                self.frame,
                 text=f"{proc['name']} (PID: {proc['pid']}){title_suffix}",
                 variable=var,
                 command=_make_cmd(pid, var),
@@ -527,23 +537,6 @@ class TabGames(ctk.CTkFrame):
         self.search_var.set("")
         self.filter_games()
 
-    def add_detected_game(self, exe_name: str, display_name: str, exe_path: Optional[str]):
-        """Добавляет обнаруженную игру в библиотеку."""
-        if exe_path and os.path.exists(exe_path):
-            existing = self.db.get_game_by_exe_name(exe_name)
-            if existing:
-                return
-            game_id = self.db.add_game(exe_name, display_name, exe_path)
-            icon = self.tracker.get_exe_icon(exe_path) if self.tracker else None
-            if icon:
-                icon_path = os.path.join(self.icons_dir, f"{game_id}.png")
-                icon.save(icon_path, "PNG")
-                self.db.update_icon_path(game_id, icon_path)
-        else:
-            self._add_game_by_name(exe_name, display_name, exe_path, silent=True, refresh=False)
-        self.refresh_games()
-        self._refresh_archive_tab()
-
     def add_game_from_file(self):
         filepath = filedialog.askopenfilename(
             title="Выберите исполняемый файл игры",
@@ -603,7 +596,8 @@ class TabGames(ctk.CTkFrame):
         ctk.CTkButton(dialog, text="Добавить", command=confirm, fg_color="#00d4ff").pack(pady=10)
 
     def _add_game(self, exe_path: str, silent: bool = False, refresh: bool = True) -> bool:
-        exe_name = os.path.basename(exe_path)
+        # basename по «/» после нормализации: одинаково работает и в Windows, и в тестах на Linux
+        exe_name = os.path.basename(exe_path.replace("\\", "/"))
         display_name = os.path.splitext(exe_name)[0].title()
         existing = self.db.get_game_by_exe_name(exe_name)
         if existing:

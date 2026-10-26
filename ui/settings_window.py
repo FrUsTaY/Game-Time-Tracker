@@ -2,10 +2,11 @@
 settings_window.py — окно настроек GameTimeTracker.
 """
 
-import customtkinter as ctk
-from tkinter import messagebox, filedialog
 import os
 from datetime import datetime
+from tkinter import filedialog, messagebox
+
+import customtkinter as ctk
 
 from database import Database
 from settings import AppSettings
@@ -19,7 +20,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.settings = settings
 
         self.title("Настройки GameTimeTracker")
-        self.geometry("600x550")
+        self.geometry("640x700")
         self.resizable(False, False)
         self.transient(parent)
         # Скрываем окно до позиционирования
@@ -79,6 +80,34 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         tracking_switch.pack(anchor="w", padx=20, pady=(0, 10))
 
+        # ---- Бездействие (AFK) ----
+        self._add_section(main_frame, "Бездействие (AFK)")
+        self.vars["pause_when_idle"] = ctk.BooleanVar()
+        idle_switch = ctk.CTkSwitch(
+            main_frame, text="Не считать время, если пользователь отошёл",
+            variable=self.vars["pause_when_idle"],
+            command=self._toggle_idle_entry,
+            text_color="#e0e0e0"
+        )
+        idle_switch.pack(anchor="w", padx=20, pady=(0, 5))
+        idle_hint = ctk.CTkLabel(
+            main_frame,
+            text="Время не учитывается, если мышь и клавиатура неактивны дольше порога.\n"
+                 "Полезно, если игра остаётся открытой без присмотра.",
+            font=("Segoe UI", 10), text_color="#888888", justify="left"
+        )
+        idle_hint.pack(anchor="w", padx=35, pady=(0, 5))
+
+        idle_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        idle_frame.pack(anchor="w", padx=35, pady=(0, 10))
+        ctk.CTkLabel(idle_frame, text="Порог бездействия:", text_color="#e0e0e0").pack(side="left")
+        self.vars["idle_threshold_minutes"] = ctk.StringVar()
+        self.idle_entry = ctk.CTkEntry(
+            idle_frame, width=60, textvariable=self.vars["idle_threshold_minutes"], justify="center"
+        )
+        self.idle_entry.pack(side="left", padx=5)
+        ctk.CTkLabel(idle_frame, text="минут", text_color="#e0e0e0").pack(side="left")
+
         # ---- Уведомления ----
         self._add_section(main_frame, "Уведомления")
         self.vars["notify_new_game"] = ctk.BooleanVar()
@@ -105,6 +134,65 @@ class SettingsWindow(ctk.CTkToplevel):
         minutes_entry.pack(side="left", padx=5)
         ctk.CTkLabel(minutes_frame, text="минут", text_color="#e0e0e0").pack(side="left")
         self.minutes_entry = minutes_entry
+
+        self.vars["weekly_summary_enabled"] = ctk.BooleanVar()
+        weekly_switch = ctk.CTkSwitch(
+            main_frame, text="Еженедельная сводка активности (раз в 7 дней)",
+            variable=self.vars["weekly_summary_enabled"], text_color="#e0e0e0"
+        )
+        weekly_switch.pack(anchor="w", padx=20, pady=(10, 10))
+
+        # ---- Дневной лимит ----
+        self._add_section(main_frame, "Дневной лимит")
+        self.vars["daily_limit_enabled"] = ctk.BooleanVar()
+        limit_switch = ctk.CTkSwitch(
+            main_frame, text="Напоминать о достижении дневного лимита",
+            variable=self.vars["daily_limit_enabled"],
+            command=self._toggle_limit_entry,
+            text_color="#e0e0e0"
+        )
+        limit_switch.pack(anchor="w", padx=20, pady=(0, 5))
+
+        limit_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        limit_frame.pack(anchor="w", padx=35, pady=(5, 10))
+        ctk.CTkLabel(limit_frame, text="Лимит в день:", text_color="#e0e0e0").pack(side="left")
+        self.vars["daily_limit_minutes"] = ctk.StringVar()
+        self.limit_entry = ctk.CTkEntry(
+            limit_frame, width=60, textvariable=self.vars["daily_limit_minutes"], justify="center"
+        )
+        self.limit_entry.pack(side="left", padx=5)
+        ctk.CTkLabel(limit_frame, text="минут", text_color="#e0e0e0").pack(side="left")
+
+        # ---- Лимиты по играм ----
+        self._add_section(main_frame, "Лимиты по играм")
+        ctk.CTkLabel(
+            main_frame,
+            text="Индивидуальный дневной лимит для конкретной игры:",
+            font=("Segoe UI", 11), text_color="#888888"
+        ).pack(anchor="w", padx=20, pady=(0, 5))
+
+        game_limit_row = ctk.CTkFrame(main_frame, fg_color="transparent")
+        game_limit_row.pack(anchor="w", padx=20, pady=(0, 5), fill="x")
+        self.game_limit_var = ctk.StringVar(value="—")
+        self.game_limit_menu = ctk.CTkOptionMenu(
+            game_limit_row, values=["—"], variable=self.game_limit_var,
+            width=220, fg_color="#1a1a2e", button_color="#2a2a4e"
+        )
+        self.game_limit_menu.pack(side="left", padx=(0, 5))
+        self.game_limit_entry = ctk.CTkEntry(game_limit_row, width=60, justify="center")
+        self.game_limit_entry.pack(side="left", padx=5)
+        ctk.CTkLabel(game_limit_row, text="мин", text_color="#e0e0e0").pack(side="left", padx=(0, 5))
+        ctk.CTkButton(
+            game_limit_row, text="Сохранить", width=90, height=28,
+            command=self._save_game_limit, fg_color="#00d4ff",
+            hover_color="#0099cc", text_color="#0d0d0d"
+        ).pack(side="left", padx=2)
+
+        self.game_limits_frame = ctk.CTkFrame(main_frame, fg_color="#1a1a2e", corner_radius=8)
+        self.game_limits_frame.pack(anchor="w", padx=20, pady=(5, 10), fill="x")
+        self._games_by_title = {}
+        self._refresh_game_limits()
+
         # ---- Не отслеживаются ----
         self._add_section(main_frame, "Не отслеживаются")
         desc_label = ctk.CTkLabel(
@@ -138,6 +226,35 @@ class SettingsWindow(ctk.CTkToplevel):
             text_color="#7b2fff", hover_color="#1a1a2e", height=35
         )
         backup_btn.pack(fill="x", pady=2)
+
+        export_json_btn = ctk.CTkButton(
+            btn_frame, text="⬇ Экспортировать всё в JSON",
+            command=self.export_json, fg_color="transparent",
+            border_color="#00ff88", border_width=1,
+            text_color="#00ff88", hover_color="#1a1a2e", height=35
+        )
+        export_json_btn.pack(fill="x", pady=2)
+
+        import_json_btn = ctk.CTkButton(
+            btn_frame, text="⬆ Импортировать данные из JSON",
+            command=self.import_json, fg_color="transparent",
+            border_color="#ff4444", border_width=1,
+            text_color="#ff4444", hover_color="#1a1a2e", height=35
+        )
+        import_json_btn.pack(fill="x", pady=2)
+
+        self.vars["backup_on_startup"] = ctk.BooleanVar()
+        backup_switch = ctk.CTkSwitch(
+            main_frame, text="Автоматическая резервная копия при запуске",
+            variable=self.vars["backup_on_startup"], text_color="#e0e0e0"
+        )
+        backup_switch.pack(anchor="w", padx=20, pady=(5, 0))
+        backup_hint = ctk.CTkLabel(
+            main_frame,
+            text="Копии хранятся в data/backups (по умолчанию — последние 7)",
+            font=("Segoe UI", 10), text_color="#888888"
+        )
+        backup_hint.pack(anchor="w", padx=35, pady=(0, 5))
 
         open_folder_btn = ctk.CTkButton(
             btn_frame, text="📂 Открыть папку с данными",
@@ -187,13 +304,52 @@ class SettingsWindow(ctk.CTkToplevel):
         self.vars["notify_new_game"].set(self.settings.notify_new_game)
         self.vars["notify_long_session"].set(self.settings.notify_long_session)
         self.vars["long_session_minutes"].set(str(self.settings.long_session_minutes))
+        self.vars["pause_when_idle"].set(self.settings.pause_when_idle)
+        self.vars["idle_threshold_minutes"].set(str(self.settings.idle_threshold_minutes))
+        self.vars["daily_limit_enabled"].set(self.settings.daily_limit_enabled)
+        self.vars["daily_limit_minutes"].set(str(self.settings.daily_limit_minutes))
+        self.vars["backup_on_startup"].set(self.settings.backup_on_startup)
+        self.vars["weekly_summary_enabled"].set(self.settings.weekly_summary_enabled)
         self._toggle_long_session_entry()
+        self._toggle_idle_entry()
+        self._toggle_limit_entry()
 
     def _toggle_long_session_entry(self):
         if self.vars["notify_long_session"].get():
             self.minutes_entry.configure(state="normal")
         else:
             self.minutes_entry.configure(state="disabled")
+
+    def _toggle_idle_entry(self):
+        self.idle_entry.configure(
+            state="normal" if self.vars["pause_when_idle"].get() else "disabled"
+        )
+
+    def _toggle_limit_entry(self):
+        self.limit_entry.configure(
+            state="normal" if self.vars["daily_limit_enabled"].get() else "disabled"
+        )
+
+    def _var_bool(self, key: str, default: bool = False) -> bool:
+        """Безопасно читает булеву переменную (устойчиво к неполному набору vars)."""
+        var = self.vars.get(key)
+        if var is None:
+            return default
+        try:
+            return bool(var.get())
+        except Exception:
+            return default
+
+    def _read_int(self, key: str, setter, fallback: int) -> None:
+        """Аккуратно сохраняет целочисленную настройку из поля ввода."""
+        var = self.vars.get(key)
+        if var is None:
+            return
+        try:
+            value = int(str(var.get()).strip())
+        except (TypeError, ValueError):
+            return
+        setter(value)
 
     def _refresh_ignored_list(self):
         """Обновляет список процессов в секции 'Не отслеживаются'."""
@@ -265,7 +421,162 @@ class SettingsWindow(ctk.CTkToplevel):
             self.settings.long_session_minutes = minutes
         except ValueError:
             pass
+        self.settings.pause_when_idle = self._var_bool("pause_when_idle", self.settings.pause_when_idle)
+        self._read_int("idle_threshold_minutes", lambda v: setattr(self.settings, 'idle_threshold_minutes', v), 5)
+        self.settings.daily_limit_enabled = self._var_bool("daily_limit_enabled", self.settings.daily_limit_enabled)
+        self._read_int("daily_limit_minutes", lambda v: setattr(self.settings, 'daily_limit_minutes', v), 180)
+        self.settings.backup_on_startup = self._var_bool("backup_on_startup", self.settings.backup_on_startup)
+        self.settings.weekly_summary_enabled = self._var_bool(
+            "weekly_summary_enabled", self.settings.weekly_summary_enabled
+        )
         self.destroy()
+
+    # ----- Лимиты по играм -----
+
+    def _refresh_game_limits(self):
+        """Обновляет список игр и текущих индивидуальных лимитов."""
+        try:
+            games = self.db.get_all_games(archived=False) if self.db else []
+        except Exception:
+            games = []
+        self._games_by_title = {g['display_name']: g for g in games}
+        values = list(self._games_by_title.keys()) or ["—"]
+        try:
+            self.game_limit_menu.configure(values=values)
+            if self.game_limit_var.get() not in values:
+                self.game_limit_var.set(values[0])
+        except Exception:
+            pass
+
+        for widget in self.game_limits_frame.winfo_children():
+            widget.destroy()
+
+        try:
+            limits = self.db.get_games_with_limits() if self.db else []
+        except Exception:
+            limits = []
+
+        if not limits:
+            ctk.CTkLabel(
+                self.game_limits_frame,
+                text="Индивидуальные лимиты не заданы",
+                font=("Segoe UI", 11), text_color="#666666"
+            ).pack(pady=8)
+            return
+
+        for row in limits:
+            item = ctk.CTkFrame(self.game_limits_frame, fg_color="transparent")
+            item.pack(fill="x", padx=10, pady=3)
+            ctk.CTkLabel(
+                item, text=f"•  {row['display_name']}",
+                font=("Consolas", 12), text_color="#e0e0e0"
+            ).pack(side="left", padx=5)
+            ctk.CTkLabel(
+                item, text=f"{row['daily_limit_minutes']} мин",
+                font=("Consolas", 12), text_color="#00d4ff"
+            ).pack(side="left", padx=5)
+            ctk.CTkButton(
+                item, text="Снять", width=80, height=24,
+                fg_color="#333333", hover_color="#555555",
+                command=lambda gid=row['id']: self._reset_game_limit(gid)
+            ).pack(side="right", padx=5)
+
+    def _selected_game(self):
+        return self._games_by_title.get(self.game_limit_var.get())
+
+    def _save_game_limit(self):
+        game = self._selected_game()
+        if not game:
+            messagebox.showwarning("Лимит", "Сначала добавьте игры в библиотеку")
+            return
+        raw = self.game_limit_entry.get().strip()
+        try:
+            minutes = int(raw)
+        except (TypeError, ValueError):
+            messagebox.showerror("Лимит", "Введите целое число минут (например, 90)")
+            return
+        if minutes < 1:
+            minutes = 1
+        self.db.set_game_daily_limit(game['id'], minutes)
+        self._refresh_game_limits()
+        messagebox.showinfo("Лимит сохранён", f"«{game['display_name']}» — {minutes} мин в день")
+
+    def _reset_game_limit(self, game_id):
+        self.db.set_game_daily_limit(game_id, None)
+        self._refresh_game_limits()
+
+    def refresh_dynamic_sections(self):
+        """Обновляет списки, зависящие от содержимого БД (игры, игнорируемые)."""
+        self._refresh_game_limits()
+        self._refresh_ignored_list()
+
+    # ----- Экспорт / импорт -----
+
+    def _refresh_main_tabs(self):
+        """Обновляет данные вкладок главного окна после импорта."""
+        main = self.master
+        for tab in getattr(main, 'tabs_cache', {}).values():
+            try:
+                for method in ('refresh_games', 'load_stats', 'load_month_data', 'refresh'):
+                    if hasattr(tab, method):
+                        getattr(tab, method)()
+                        break
+            except Exception:
+                continue
+
+    def export_json(self):
+        filepath = filedialog.asksaveasfilename(
+            title="Экспорт всех данных в JSON", defaultextension=".json",
+            initialfile="gametimetracker_data.json",
+            filetypes=[("JSON файлы", "*.json"), ("Все файлы", "*.*")]
+        )
+        if not filepath:
+            return
+        if self.db.export_data_json(filepath):
+            messagebox.showinfo("Экспорт", f"Данные сохранены:\n{filepath}")
+        else:
+            messagebox.showerror("Ошибка", "Не удалось экспортировать данные")
+
+    def import_json(self):
+        filepath = filedialog.askopenfilename(
+            title="Импорт данных из JSON",
+            filetypes=[("JSON файлы", "*.json"), ("Все файлы", "*.*")]
+        )
+        if not filepath:
+            return
+        if not messagebox.askyesno(
+            "Импорт данных",
+            "Текущие игры и сессии будут заменены данными из файла.\n\n"
+            "Перед импортом автоматически создаётся резервная копия базы.\nПродолжить?"
+        ):
+            return
+        try:
+            result = self.db.import_data_json(filepath, replace=True, auto_backup=True)
+        except Exception as e:
+            messagebox.showerror("Ошибка импорта", str(e))
+            return
+
+        # Активные сессии ссылаются на старые ID игр — после замены данных
+        # они неактуальны, поэтому сбрасываем их (БД уже заменена импортом).
+        tracker = getattr(self.master, 'tracker', None)
+        if tracker is not None:
+            try:
+                with tracker.lock:
+                    tracker.active_sessions.clear()
+            except Exception:
+                pass
+
+        self._refresh_main_tabs()
+        self.refresh_dynamic_sections()
+        message = (
+            f"Импортировано игр: {result['games']}\n"
+            f"Сессий: {result['sessions']}\n"
+            f"Игнорируемых процессов: {result['ignored']}"
+        )
+        if result.get('backup'):
+            message += f"\n\nРезервная копия:\n{result['backup']}"
+        message += "\n\nЕсли игра запущена прямо сейчас, перезапустите приложение."
+        messagebox.showinfo("Импорт завершён", message)
 
     def export_csv(self):
         filepath = filedialog.asksaveasfilename(
@@ -293,10 +604,13 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def open_data_folder(self):
         data_dir = os.path.join(get_base_dir(), "data")
-        if os.path.exists(data_dir):
-            os.startfile(data_dir)
-        else:
+        if not os.path.exists(data_dir):
             messagebox.showwarning("Папка не найдена", "Папка data ещё не создана.")
+            return
+        if hasattr(os, "startfile"):
+            os.startfile(data_dir)
+        else:  # не-Windows: просто показываем путь
+            messagebox.showinfo("Папка с данными", data_dir)
 
     def exit_app(self):
         if messagebox.askyesno("Выход", "Вы уверены, что хотите закрыть приложение?"):

@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from database import Database
 from settings import AppSettings
 from tracker import GameTracker
-from ui.tab_about import TabAbout, APP_VERSION
+from ui.tab_about import APP_VERSION, TabAbout
 
 
 class TestAudit2Task5Notifications(unittest.TestCase):
@@ -214,9 +214,25 @@ class TestAudit2Task6SpecAndVersion(unittest.TestCase):
         self.assertNotIn("C:\\Users", content)
 
     def test_tab_about_version_constant_and_check_updates(self):
-        """TabAbout использует константу актуальной версии v1.1.2 в UI и диалоге обновлений"""
-        self.assertEqual(APP_VERSION, "v1.1.2")
-        self.assertEqual(TabAbout.APP_VERSION, "v1.1.2")
+        """
+        TabAbout использует единую константу версии в UI и диалоге обновлений.
+
+        Тест намеренно не хардкодит номер версии (раньше он падал при каждом
+        релизе), а проверяет формат и согласованность с pyproject.toml.
+        """
+        import re
+
+        self.assertRegex(APP_VERSION, r"^v\d+\.\d+\.\d+$")
+        self.assertEqual(TabAbout.APP_VERSION, APP_VERSION)
+
+        pyproject_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), '..', 'pyproject.toml')
+        )
+        if os.path.exists(pyproject_path):
+            with open(pyproject_path, 'r', encoding='utf-8') as f:
+                found = re.search(r'^version\s*=\s*"([^"]+)"', f.read(), re.MULTILINE)
+            self.assertIsNotNone(found, "В pyproject.toml должна быть указана версия")
+            self.assertEqual(f"v{found.group(1)}", APP_VERSION)
 
         tab = TabAbout.__new__(TabAbout)
         with patch('tkinter.messagebox.showinfo') as mock_info:
@@ -224,8 +240,7 @@ class TestAudit2Task6SpecAndVersion(unittest.TestCase):
             mock_info.assert_called_once()
             title, msg = mock_info.call_args[0]
             self.assertEqual(title, "Проверка обновлений")
-            self.assertIn("v1.1.2", msg)
-            self.assertNotIn("v1.0.0", msg)
+            self.assertIn(APP_VERSION, msg)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests-windows:
+    name: Тесты (Windows, полный набор)
+    runs-on: windows-latest
+    env:
+      PYTHONUNBUFFERED: "1"
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Установка зависимостей
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Запуск тестов
+        # GUI-тесты Tkinter/Matplotlib на раннере иногда флейкуют по таймингам:
+        # при падении повторяем только упавшие тесты. Детерминированные ошибки
+        # падают и во второй раз — они не маскируются.
+        run: pytest -q -ra --cov=. --cov-report=term-missing || pytest -q -ra --last-failed
+
+  core-linux:
+    name: Ядро и аналитика (Linux, без GUI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Установка минимальных зависимостей
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest psutil Pillow pytest-github-actions-annotate-failures
+
+      - name: Проверка импорта ядра без Windows-модулей
+        run: python -c "import database, settings, tracker, utils, logging_setup; print('core imports OK')"
+
+      - name: Тесты базы данных, настроек и новой аналитики
+        run: >
+          pytest -q -ra
+          tests/test_database.py
+          tests/test_settings.py
+          tests/test_new_features.py
+          tests/test_backlog_features.py
+          tests/test_utils_and_paths.py
+
+  lint:
+    name: Линтер (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check .

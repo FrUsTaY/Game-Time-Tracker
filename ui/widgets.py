@@ -2,10 +2,11 @@
 widgets.py — переиспользуемые виджеты для GameTimeTracker.
 """
 
+import os
+from typing import Callable, Optional
+
 import customtkinter as ctk
 from PIL import Image, ImageTk
-from typing import Callable, Optional
-import os
 
 
 class NeonButton(ctk.CTkButton):

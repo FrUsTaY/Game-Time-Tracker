@@ -2,13 +2,17 @@
 tray.py — модуль системного трея для GameTimeTracker.
 """
 
+import logging
+import os
 import threading
+from typing import Callable
+
 import pystray
 from PIL import Image, ImageDraw
-import os
-import sys
-from typing import Callable
+
 from utils import resource_path
+
+logger = logging.getLogger(__name__)
 
 
 class SystemTray:
@@ -40,7 +44,7 @@ class SystemTray:
             try:
                 return Image.open(full_path)
             except Exception as e:
-                print(f"Ошибка загрузки иконки трея: {e}")
+                logger.warning("Ошибка загрузки иконки трея: %s", e)
         # Иконка-заглушка
         size = 64
         img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
@@ -84,7 +88,7 @@ class SystemTray:
                     try:
                         self.on_notification_click()
                     except Exception as e:
-                        print(f"SystemTray: ошибка в on_notification_click: {e}")
+                        logger.warning("SystemTray: ошибка в on_notification_click: %s", e)
             if orig_on_notify:
                 try:
                     return orig_on_notify(wparam, lparam)
@@ -112,7 +116,7 @@ class SystemTray:
         self._running = True
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
-        print("SystemTray: иконка трея запущена")
+        logger.info("SystemTray: иконка трея запущена")
 
     def stop(self):
         """Останавливает иконку трея. Вызывать из основного потока."""
@@ -122,7 +126,7 @@ class SystemTray:
         # Присоединяем поток только если он не является текущим
         if self.thread and self.thread.is_alive() and self.thread != threading.current_thread():
             self.thread.join(timeout=1.0)
-        print("SystemTray: иконка трея остановлена")
+        logger.info("SystemTray: иконка трея остановлена")
 
     def show_notification(self, title: str, message: str):
         if self.icon and self._running:
@@ -135,6 +139,22 @@ class SystemTray:
             from plyer import notification
             notification.notify(title=title, message=message, app_name="GameTimeTracker", timeout=5)
         except ImportError:
-            print(f"Уведомление: {title} - {message}")
+            logger.info("Уведомление: %s - %s", title, message)
         except Exception as e:
-            print(f"Ошибка показа уведомления: {e}")
+            logger.warning("Ошибка показа уведомления: %s", e)
+
+    def set_tooltip(self, text: str) -> None:
+        """
+        Обновляет всплывающую подсказку иконки в трее.
+
+        Позволяет показывать актуальную статистику (например, время за
+        сегодня) без открытия главного окна. Не бросает исключений, если
+        иконка ещё не создана или pystray не поддерживает смену заголовка.
+        """
+        if not text:
+            return
+        try:
+            if self.icon is not None:
+                self.icon.title = text
+        except Exception as e:  # pragma: no cover - зависит от бэкенда pystray
+            logger.debug("Не удалось обновить подсказку трея: %s", e)

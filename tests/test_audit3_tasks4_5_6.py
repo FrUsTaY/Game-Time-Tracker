@@ -4,11 +4,11 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import build
 from database import Database
 from settings import AppSettings
 from ui.settings_window import SettingsWindow
 from ui.tab_games import TabGames
-import build
 
 
 class TestAudit3Task4AutostartSync(unittest.TestCase):
@@ -122,7 +122,7 @@ class TestAudit3Task5GamesUX(unittest.TestCase):
         """При ручном вводе имени без .exe автоматически добавляется .exe"""
         with patch('customtkinter.CTkToplevel') as mock_toplevel, \
              patch('tkinter.messagebox.showinfo'), \
-             patch.object(self.tab, '_add_game_by_name') as mock_add_by_name:
+             patch.object(self.tab, '_add_game_by_name') as _mock_add_by_name:
 
             # Эмулируем вызов add_game_manual и подтверждение диалога
             mock_dlg = MagicMock()

@@ -4,20 +4,59 @@ tracker.py — модуль мониторинга игровых процесс
 учитывает время для отслеживаемых игр с учётом настройки track_only_active_window.
 """
 
+import ctypes
+import logging
+import os
+import sys
 import threading
 import time
-import os
-from typing import Dict, List, Optional, Callable, Any
+from datetime import date
+from typing import Any, Callable, Dict, List, Optional
 
 import psutil
-import win32gui
-import win32process
-import win32ui
-import win32con
+
+try:  # Модули pywin32 доступны только в Windows
+    import win32con
+    import win32gui
+    import win32process
+    import win32ui
+    WIN32_AVAILABLE = True
+except ImportError:  # pragma: no cover - зависит от платформы
+    win32gui = win32process = win32ui = win32con = None
+    WIN32_AVAILABLE = False
+
 from PIL import Image
 
 from database import Database
 from settings import AppSettings
+from utils import format_duration
+
+logger = logging.getLogger(__name__)
+
+
+class _LASTINPUTINFO(ctypes.Structure):
+    """Структура WinAPI для GetLastInputInfo (время последнего ввода)."""
+    _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_ulong)]
+
+
+def get_idle_seconds() -> Optional[float]:
+    """
+    Возвращает количество секунд с момента последнего ввода (мышь/клавиатура).
+
+    None — если определить невозможно (не Windows или вызов WinAPI не удался).
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        info = _LASTINPUTINFO()
+        info.cbSize = ctypes.sizeof(info)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+            return None
+        tick_count = ctypes.windll.kernel32.GetTickCount()
+        elapsed_ms = (tick_count - info.dwTime) & 0xFFFFFFFF
+        return elapsed_ms / 1000.0
+    except Exception:  # pragma: no cover - зависит от платформы
+        return None
 
 # Общеизвестные системные процессы и консольные утилиты Windows
 SYSTEM_EXCLUDE_EXES = {
@@ -91,10 +130,19 @@ class GameTracker:
         # Активные сессии: {game_id: {'session_id': int, 'current_seconds': int, 'last_flushed_seconds': int, 'initial_total_seconds': int, 'process_pid': int, 'was_active': bool, 'long_session_notified': bool}}
         self.active_sessions: Dict[int, Dict[str, Any]] = {}
         self.flush_interval = 60  # Интервал периодического сброса прогресса в БД (секунды)
-        self.lock = threading.Lock()
+        # RLock: методы, вызываемые из UI, могут запрашивать блокировку,
+        # пока её уже держит цикл мониторинга (иначе — взаимная блокировка).
+        self.lock = threading.RLock()
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
+
+        # Пауза из-за бездействия (AFK) и дневной лимит
+        self._last_idle_seconds: Optional[float] = None
+        self._daily_limit_notified_date: Optional[date] = None
+        self._game_limit_notified: Dict[int, date] = {}
+        self._last_daily_limit_check = 0.0
+        self.daily_limit_check_interval = 30.0  # сек: не чаще, чтобы не нагружать БД
 
         # Множества для отслеживания запущенных процессов (.exe) и предотвращения спама уведомлениями
         self._seen_exes: set = set()
@@ -108,7 +156,7 @@ class GameTracker:
                 ignored_list = self.db.get_ignored_processes()
                 self._ignored_exes = {row['exe_name'].lower() for row in ignored_list if row.get('exe_name')}
             except Exception as e:
-                print(f"GameTracker: ошибка загрузки игнорируемых процессов: {e}")
+                logger.warning("GameTracker: ошибка загрузки игнорируемых процессов: %s", e)
 
     def notify(self, title: str, message: str) -> None:
         """Отправка системного уведомления через tray или колбэк"""
@@ -116,16 +164,16 @@ class GameTracker:
             try:
                 self.on_notification(title, message)
             except Exception as e:
-                print(f"GameTracker: ошибка в on_notification: {e}")
+                logger.warning("GameTracker: ошибка в on_notification: %s", e)
 
         if self.tray and hasattr(self.tray, 'show_notification'):
             try:
                 self.tray.show_notification(title, message)
             except Exception as e:
-                print(f"GameTracker: ошибка в tray.show_notification: {e}")
+                logger.warning("GameTracker: ошибка в tray.show_notification: %s", e)
 
         if not self.on_notification and not self.tray:
-            print(f"Уведомление: {title} - {message}")
+            logger.info("Уведомление: %s - %s", title, message)
 
     def get_game_total_seconds(self, game_id: int, default_seconds: int = 0) -> int:
         """Возвращает актуальное общее время игры с учётом текущей незавершённой сессии"""
@@ -153,6 +201,118 @@ class GameTracker:
             except Exception:
                 return session.get('was_active', False)
 
+    def is_user_idle(self) -> bool:
+        """
+        Возвращает True, если пользователь бездействует дольше заданного порога.
+
+        Это защищает статистику от «накрутки»: если игра оставлена открытой и
+        пользователь ушёл, время больше не учитывается (настройка opt-in).
+        """
+        try:
+            if not self.settings.pause_when_idle:
+                self._last_idle_seconds = None
+                return False
+            threshold = max(int(self.settings.idle_threshold_minutes), 1) * 60
+        except (AttributeError, TypeError, ValueError):
+            return False
+
+        idle_seconds = get_idle_seconds()
+        self._last_idle_seconds = idle_seconds
+        if idle_seconds is None:
+            return False
+        return idle_seconds >= threshold
+
+    def get_live_today_seconds(self) -> int:
+        """Игровое время за сегодня с учётом ещё не сброшенного прогресса."""
+        total = 0
+        try:
+            total = self.db.get_today_seconds(include_archived=True)
+        except Exception as e:
+            logger.warning("Не удалось получить время за сегодня: %s", e)
+        with self.lock:
+            unflushed = sum(
+                max(info.get('current_seconds', 0) - info.get('last_flushed_seconds', 0), 0)
+                for info in self.active_sessions.values()
+            )
+        return total + unflushed
+
+    def _check_daily_limit(self) -> None:
+        """Уведомляет один раз в день о превышении дневного лимита."""
+        try:
+            if not self.settings.daily_limit_enabled:
+                return
+            limit_minutes = max(int(self.settings.daily_limit_minutes), 1)
+        except (AttributeError, TypeError, ValueError):
+            return
+
+        today = date.today()
+        if self._daily_limit_notified_date == today:
+            return
+        if self.get_live_today_seconds() < limit_minutes * 60:
+            return
+
+        self._daily_limit_notified_date = today
+        hours, minutes = divmod(limit_minutes, 60)
+        limit_text = f"{hours} ч {minutes:02d} мин" if hours else f"{minutes} мин"
+        self.notify(
+            "GameTimeTracker",
+            f"⏳ Достигнут дневной лимит игрового времени ({limit_text}). Самое время отдохнуть!"
+        )
+
+    def _check_game_limits(self) -> None:
+        """Уведомляет о достижении индивидуального дневного лимита по игре."""
+        try:
+            limits = self.db.get_games_with_limits()
+        except Exception as e:
+            logger.warning("Не удалось получить лимиты по играм: %s", e)
+            return
+        if not limits:
+            return
+
+        today = date.today()
+        for game in limits:
+            game_id = game.get('id')
+            minutes = int(game.get('daily_limit_minutes') or 0)
+            if not game_id or minutes <= 0:
+                continue
+            if self._game_limit_notified.get(game_id) == today:
+                continue
+
+            limit_seconds = minutes * 60
+            with self.lock:
+                played = 0
+                try:
+                    played = self.db.get_game_seconds_for_day(game_id, today)
+                except Exception as e:
+                    logger.warning("Не удалось получить время игры %s за день: %s", game_id, e)
+                info = self.active_sessions.get(game_id)
+                if info:
+                    played += max(
+                        info.get('current_seconds', 0) - info.get('last_flushed_seconds', 0), 0
+                    )
+
+            if played >= limit_seconds:
+                self._game_limit_notified[game_id] = today
+                name = game.get('display_name') or game.get('exe_name') or 'Игра'
+                self.notify(
+                    "GameTimeTracker",
+                    f"⏳ Достигнут дневной лимит по игре «{name}» "
+                    f"({format_duration(limit_seconds)}). Пора сделать перерыв!"
+                )
+
+    def _check_limits(self) -> None:
+        """
+        Проверяет все лимиты (общий и по играм) не чаще, чем раз в
+        `daily_limit_check_interval` секунд: лимиты измеряются в минутах,
+        а лишние запросы к БД каждую секунду ни к чему.
+        """
+        now = time.monotonic()
+        if now - self._last_daily_limit_check < self.daily_limit_check_interval:
+            return
+        self._last_daily_limit_check = now
+        self._check_daily_limit()
+        self._check_game_limits()
+
     def ignore_exe(self, exe_name: str) -> None:
         """Добавляет имя файла в список игнорируемых, чтобы не предлагать его снова, и сохраняет в БД"""
         if not exe_name:
@@ -163,7 +323,7 @@ class GameTracker:
             try:
                 self.db.add_ignored_process(name_lower)
             except Exception as e:
-                print(f"GameTracker: ошибка сохранения игнорируемого процесса: {e}")
+                logger.warning("GameTracker: ошибка сохранения игнорируемого процесса: %s", e)
 
     def unignore_exe(self, exe_name: str) -> None:
         """Удаляет процесс из игнорируемых в БД и памяти, чтобы его снова можно было отслеживать"""
@@ -177,7 +337,7 @@ class GameTracker:
             try:
                 self.db.remove_ignored_process(name_lower)
             except Exception as e:
-                print(f"GameTracker: ошибка удаления игнорируемого процесса: {e}")
+                logger.warning("GameTracker: ошибка удаления игнорируемого процесса: %s", e)
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -191,7 +351,7 @@ class GameTracker:
         self._running = True
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._thread.start()
-        print("GameTracker: поток мониторинга запущен")
+        logger.info("GameTracker: поток мониторинга запущен")
 
     def stop(self) -> None:
         self._running = False
@@ -202,7 +362,7 @@ class GameTracker:
             for game_id, session_info in list(self.active_sessions.items()):
                 self._close_session(game_id, session_info, force=True)
             self.active_sessions.clear()
-        print("GameTracker: поток мониторинга остановлен")
+        logger.info("GameTracker: поток мониторинга остановлен")
 
     def _monitor_loop(self) -> None:
         while self._running:
@@ -210,7 +370,7 @@ class GameTracker:
             try:
                 self._check_processes()
             except Exception as e:
-                print(f"Ошибка в цикле мониторинга: {e}")
+                logger.exception("Ошибка в цикле мониторинга: %s", e)
             elapsed = time.monotonic() - loop_start
             sleep_time = max(0.1, 1.0 - elapsed)
             time.sleep(sleep_time)
@@ -301,7 +461,7 @@ class GameTracker:
                             try:
                                 self.on_game_detected(exe_name, proc_data.get('exe_path'))
                             except Exception as e:
-                                print(f"GameTracker: ошибка в on_game_detected: {e}")
+                                logger.warning("GameTracker: ошибка в on_game_detected: %s", e)
                         clean_name = os.path.splitext(exe_name)[0].replace('_', ' ').replace('-', ' ').title()
                         self.notify("GameTimeTracker", f"🎮 Обнаружена игра: {clean_name} ({exe_name})! Нажмите для добавления")
                 else:
@@ -341,6 +501,7 @@ class GameTracker:
         # Получаем активное окно
         active_pid = self._get_active_window_pid()
         now = time.monotonic()
+        user_idle = self.is_user_idle()
 
         with self.lock:
             # 1. Обновляем существующие сессии
@@ -357,6 +518,9 @@ class GameTracker:
                     active_pid,
                     tracked_games[game_id].get('pids')
                 )
+                # При бездействии пользователя время не накапливаем (AFK-пауза)
+                if user_idle:
+                    is_active = False
 
                 last_tick = session_info.get('last_tick_time', now)
                 delta = now - last_tick
@@ -407,6 +571,10 @@ class GameTracker:
                         total_seconds = initial_sec + session_info['current_seconds']
                         self.on_tick(game_id, total_seconds, False)
 
+            # 1b. Проверяем лимиты игрового времени (общий и по играм)
+            if self.active_sessions:
+                self._check_limits()
+
             # 2. Создаём новые сессии для вновь запущенных игр
             for game_id, proc_info in tracked_games.items():
                 if game_id not in self.active_sessions:
@@ -427,7 +595,7 @@ class GameTracker:
                         'was_active': False,
                         'long_session_notified': False
                     }
-                    print(f"GameTracker: создана сессия {session_id} для игры ID {game_id} (PID {proc_info['pid']})")
+                    logger.info("GameTracker: создана сессия %s для игры ID %s (PID %s)", session_id, game_id, proc_info["pid"])
 
     def _get_active_window_pid(self) -> Optional[int]:
         try:
@@ -484,12 +652,12 @@ class GameTracker:
         unflushed = session_info['current_seconds'] - session_info.get('last_flushed_seconds', 0)
         if unflushed > 0:
             try:
-                self.db.update_game_time(game_id, unflushed)
+                self.db.update_game_time(game_id, unflushed, touch_last_launched=False)
                 self.db.update_session_duration(session_info['session_id'], session_info['current_seconds'])
                 session_info['last_flushed_seconds'] = session_info['current_seconds']
-                print(f"GameTracker: сброс прогресса сессии {session_info['session_id']} (игра ID {game_id}): +{unflushed} сек, всего {session_info['current_seconds']} сек")
+                logger.debug("GameTracker: сброс прогресса сессии %s (игра ID %s): +%s сек, всего %s сек", session_info["session_id"], game_id, unflushed, session_info["current_seconds"])
             except Exception as e:
-                print(f"GameTracker: ошибка при периодическом сбросе прогресса: {e}")
+                logger.warning("GameTracker: ошибка при периодическом сбросе прогресса: %s", e)
 
     def _close_session(self, game_id: int, session_info: Dict[str, Any], force: bool = False) -> None:
         session_id = session_info['session_id']
@@ -499,12 +667,12 @@ class GameTracker:
 
         try:
             if unflushed > 0:
-                self.db.update_game_time(game_id, unflushed)
+                self.db.update_game_time(game_id, unflushed, touch_last_launched=False)
                 session_info['last_flushed_seconds'] = seconds
             self.db.end_session(session_id, seconds)
-            print(f"GameTracker: завершена сессия {session_id} для игры ID {game_id}, секунд: {seconds}")
+            logger.info("GameTracker: завершена сессия %s для игры ID %s, секунд: %s", session_id, game_id, seconds)
         except Exception as e:
-            print(f"GameTracker: ошибка при сохранении завершения сессии {session_id}: {e}")
+            logger.warning("GameTracker: ошибка при сохранении завершения сессии %s: %s", session_id, e)
 
         # После завершения сессии нужно обновить UI, чтобы статус стал "не играю"
         if self.on_tick:
@@ -513,7 +681,7 @@ class GameTracker:
             try:
                 self.on_tick(game_id, total_seconds, False)
             except Exception as e:
-                print(f"GameTracker: ошибка в on_tick при завершении сессии: {e}")
+                logger.warning("GameTracker: ошибка в on_tick при завершении сессии: %s", e)
 
         if game_id in self.active_sessions:
             del self.active_sessions[game_id]
@@ -536,6 +704,8 @@ class GameTracker:
         return processes
 
     def get_exe_icon(self, exe_path: str, size: int = 32) -> Optional[Image.Image]:
+        if not WIN32_AVAILABLE:
+            return None
         if not exe_path or not os.path.exists(exe_path):
             return None
 
@@ -572,7 +742,7 @@ class GameTracker:
 
             return img
         except Exception as e:
-            print(f"Ошибка извлечения иконки из {exe_path}: {e}")
+            logger.warning("Ошибка извлечения иконки из %s: %s", exe_path, e)
             return None
         finally:
             for h in large_icons + small_icons:

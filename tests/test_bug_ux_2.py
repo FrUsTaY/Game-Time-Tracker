@@ -1,8 +1,7 @@
 import os
 import sys
 import unittest
-from datetime import date, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import customtkinter as ctk
@@ -11,9 +10,9 @@ from database import Database
 from settings import AppSettings
 from tracker import GameTracker
 from ui.main_window import MainWindow, NotificationsDialog
+from ui.settings_window import SettingsWindow
 from ui.tab_games import TabGames
 from ui.tab_stats import TabStats
-from ui.settings_window import SettingsWindow
 
 
 class TestBugUX2Tasks(unittest.TestCase):
@@ -229,7 +228,7 @@ class TestBugUX2Tasks(unittest.TestCase):
         ax = tab.top_fig.axes[0]
         top_labels = [t.get_text() for t in ax.get_yticklabels()]
         self.assertIn("Active Game", top_labels)
-        self.assertFalse(any("Archived Game" in l for l in top_labels))
+        self.assertFalse(any("Archived Game" in label for label in top_labels))
 
         # 2. Включаем «Учитывать архив»:
         tab.include_archive_var.set(True)
@@ -243,7 +242,7 @@ class TestBugUX2Tasks(unittest.TestCase):
         # Топ игр включает Archived Game
         ax2 = tab.top_fig.axes[0]
         top_labels2 = [t.get_text() for t in ax2.get_yticklabels()]
-        self.assertTrue(any("Archived Game" in l for l in top_labels2))
+        self.assertTrue(any("Archived Game" in label for label in top_labels2))
 
         tab.destroy()
 

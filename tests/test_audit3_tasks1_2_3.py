@@ -1,16 +1,17 @@
 import os
 import sys
 import unittest
-from datetime import date, timedelta
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import customtkinter as ctk
+
 from database import Database
 from settings import AppSettings
-from tracker import GameTracker, is_system_process, SYSTEM_EXCLUDE_EXES
-from ui.tab_stats import TabStats
+from tracker import GameTracker, is_system_process
 from ui.tab_calendar import TabCalendar
+from ui.tab_stats import TabStats
 
 
 class TestAudit3Task1SafeDuration(unittest.TestCase):
@@ -241,8 +242,8 @@ class TestAudit3Task3ArchivedGamesStats(unittest.TestCase):
         # Проверим, что на графике присутствуют метки обеих игр
         ax = tab.top_fig.axes[0]
         labels = [t.get_text() for t in ax.get_yticklabels()]
-        self.assertTrue(any("Archived Game" in l for l in labels))
-        self.assertTrue(any("Active Game" in l for l in labels))
+        self.assertTrue(any("Archived Game" in label for label in labels))
+        self.assertTrue(any("Active Game" in label for label in labels))
 
         tab.destroy()
 

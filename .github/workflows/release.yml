@@ -1,0 +1,108 @@
+name: Сборка .exe
+
+# Сборка релизного GameTimeTracker.exe на windows-latest.
+#  * вручную (workflow_dispatch) — собранный exe коммитится в ветку build/win-exe,
+#    откуда его можно забрать без Releases/Artifacts;
+#  * по тегу v* — дополнительно публикуется GitHub Release с exe.
+#
+# Локально .exe не собрать: PyInstaller не умеет кросс-компиляцию под Windows,
+# поэтому сборка всегда идёт на Windows-раннере.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_binary:
+        description: "Закоммитить exe в ветку build/win-exe"
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: exe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-exe:
+    name: Сборка GameTimeTracker.exe
+    runs-on: windows-latest
+    env:
+      PYTHONUNBUFFERED: "1"
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Установка зависимостей
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Сборка по спецификации
+        shell: pwsh
+        run: |
+          # Собираем напрямую через PyInstaller (без build.py), чтобы видеть лог:
+          # build.py глушит вывод, а логи Actions не всегда доступны.
+          python -m PyInstaller --noconfirm --clean GameTimeTracker.spec *> build.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Get-Content build.log -Tail 40 | ForEach-Object {
+              Write-Host $_
+              $line = $_ -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A'
+              Write-Output "::error::$line"
+            }
+            if (Test-Path dist) { Get-ChildItem dist | Format-Table | Out-String | Write-Host }
+            exit $code
+          }
+          Get-Content build.log -Tail 15 | Write-Host
+
+      - name: Проверка артефакта
+        shell: pwsh
+        run: |
+          $exe = "dist/GameTimeTracker.exe"
+          if (-not (Test-Path $exe)) { throw "Файл $exe не собран" }
+          $item = Get-Item $exe
+          $mb = [math]::Round($item.Length / 1MB, 1)
+          Write-Host "GameTimeTracker.exe: $mb МБ"
+          if ($item.Length -lt 5MB) { throw "exe слишком мал ($mb МБ) — вероятно, сборка неполная" }
+          "**GameTimeTracker.exe: $mb МБ** (commit ${{ github.sha }})" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Артефакт CI
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameTimeTracker-windows
+          path: dist/GameTimeTracker.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Публикация exe в ветку build/win-exe
+        if: github.event_name == 'push' || inputs.commit_binary
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          New-Item -ItemType Directory -Force -Path .exe | Out-Null
+          Copy-Item dist/GameTimeTracker.exe .exe/GameTimeTracker.exe -Force
+
+          # Отдельная «сиротская» ветка только с бинарником — не засоряет основную историю
+          git checkout --orphan build/win-exe
+          git rm -r --cached . --quiet
+          git add -f .exe/GameTimeTracker.exe
+          git commit -m "build: GameTimeTracker.exe для ${{ github.sha }}"
+          git push --force origin build/win-exe
+
+      - name: GitHub Release (по тегу)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/GameTimeTracker.exe
+          generate_release_notes: true

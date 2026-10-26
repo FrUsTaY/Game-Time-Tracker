@@ -8,6 +8,26 @@ import shutil
 import subprocess
 import sys
 
+
+def pyinstaller_command(*args):
+    """
+    Возвращает команду запуска PyInstaller через текущий интерпретатор.
+
+    `python -m PyInstaller` надёжнее, чем просто `pyinstaller`: работает и в
+    venv без активированного Scripts/PATH, и на CI-раннерах Windows.
+    """
+    return [sys.executable, "-m", "PyInstaller", *args]
+
+
+def ensure_pyinstaller():
+    """Проверяет, что PyInstaller установлен, иначе подсказывает команду."""
+    try:
+        import PyInstaller  # noqa: F401
+    except ImportError:
+        print("PyInstaller не установлен. Установите его: pip install -r requirements-dev.txt")
+        sys.exit(1)
+
+
 def clean_build():
     """Удаляет старые папки сборки."""
     dirs_to_remove = ['build', 'dist', '__pycache__']
@@ -16,8 +36,31 @@ def clean_build():
             shutil.rmtree(dir_name)
             print(f"Удалена папка {dir_name}")
 
+def run_pyinstaller_from_spec():
+    """
+    Собирает .exe по GameTimeTracker.spec — единому источнику настроек сборки.
+
+    Раньше параметры дублировались в build.py и в .spec, из-за чего они
+    расходились (например, забытые hidden-import после добавления модулей).
+    """
+    spec_path = "GameTimeTracker.spec"
+    if not os.path.exists(spec_path):
+        print("Файл GameTimeTracker.spec не найден, используется резервная сборка")
+        return run_pyinstaller()
+
+    ensure_pyinstaller()
+    print("Запуск PyInstaller по спецификации GameTimeTracker.spec...")
+    # Вывод не перехватываем: при ошибке нужен полный лог PyInstaller
+    result = subprocess.run(pyinstaller_command("--noconfirm", "--clean", spec_path))
+    if result.returncode != 0:
+        print(f"Ошибка сборки: PyInstaller завершился с кодом {result.returncode}")
+        sys.exit(1)
+    print("Сборка завершена успешно!")
+    print(f"Исполняемый файл: {os.path.abspath('dist/GameTimeTracker.exe')}")
+
+
 def run_pyinstaller():
-    """Запускает PyInstaller с нужными параметрами."""
+    """Резервная сборка: PyInstaller с явными параметрами командной строки."""
     # Проверяем наличие иконок
     if not os.path.exists("assets/app.ico"):
         print("Иконка assets/app.ico не найдена. Запустите generate_icon.py")
@@ -26,9 +69,11 @@ def run_pyinstaller():
         print("Иконка assets/icon.png не найдена. Запустите generate_icon.py")
         sys.exit(1)
 
+    ensure_pyinstaller()
+
     # Команда сборки
-    cmd = [
-        "pyinstaller",
+    cmd = pyinstaller_command(
+        "--noconfirm",
         "--onefile",                  # один exe файл
         "--windowed",                 # без консоли (оконное приложение)
         "--icon=assets/app.ico",      # иконка для exe
@@ -45,18 +90,16 @@ def run_pyinstaller():
         "--hidden-import=matplotlib",
         "--hidden-import=customtkinter",
         "--hidden-import=PIL",
-        "main.py"
-    ]
+        "main.py",
+    )
 
     print("Запуск PyInstaller...")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd)
     if result.returncode != 0:
-        print("Ошибка сборки:")
-        print(result.stderr)
+        print(f"Ошибка сборки: PyInstaller завершился с кодом {result.returncode}")
         sys.exit(1)
-    else:
-        print("Сборка завершена успешно!")
-        print(f"Исполняемый файл: {os.path.abspath('dist/GameTimeTracker.exe')}")
+    print("Сборка завершена успешно!")
+    print(f"Исполняемый файл: {os.path.abspath('dist/GameTimeTracker.exe')}")
 
 def create_launcher_bat():
     """Создаёт bat-файл для удобного запуска exe (опционально)."""
@@ -85,6 +128,6 @@ if __name__ == "__main__":
         sys.exit(1)
     else:
         print("Используются существующие иконки из папки assets")
-    run_pyinstaller()
+    run_pyinstaller_from_spec()
     create_launcher_bat()
     print("\nГотово! Файл GameTimeTracker.exe находится в папке dist.")
