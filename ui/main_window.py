@@ -397,6 +397,9 @@ class MainWindow(ctk.CTk):
         if hasattr(self, '_settings_window') and self._settings_window is not None:
             try:
                 if self._settings_window.winfo_exists():
+                    # списки игр/игнорируемых могли измениться, пока окно было скрыто
+                    if hasattr(self._settings_window, 'refresh_dynamic_sections'):
+                        self._settings_window.refresh_dynamic_sections()
                     self._settings_window.lift()
                     self._settings_window.focus_force()
                     return
@@ -406,7 +409,6 @@ class MainWindow(ctk.CTk):
 
     def hide_to_tray(self):
         self.withdraw()
-        print("GameTimeTracker продолжает работать в фоне")
 
     def show_window(self):
         self.deiconify()

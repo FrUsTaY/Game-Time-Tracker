@@ -29,6 +29,7 @@ from PIL import Image
 
 from database import Database
 from settings import AppSettings
+from utils import format_duration
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,7 @@ class GameTracker:
         # Пауза из-за бездействия (AFK) и дневной лимит
         self._last_idle_seconds: Optional[float] = None
         self._daily_limit_notified_date: Optional[date] = None
+        self._game_limit_notified: Dict[int, date] = {}
         self._last_daily_limit_check = 0.0
         self.daily_limit_check_interval = 30.0  # сек: не чаще, чтобы не нагружать БД
 
@@ -243,13 +245,6 @@ class GameTracker:
         except (AttributeError, TypeError, ValueError):
             return
 
-        # Проверяем не чаще, чем раз в daily_limit_check_interval секунд:
-        # лимит измеряется в минутах, а лишние запросы к БД ни к чему.
-        now = time.monotonic()
-        if now - self._last_daily_limit_check < self.daily_limit_check_interval:
-            return
-        self._last_daily_limit_check = now
-
         today = date.today()
         if self._daily_limit_notified_date == today:
             return
@@ -263,6 +258,60 @@ class GameTracker:
             "GameTimeTracker",
             f"⏳ Достигнут дневной лимит игрового времени ({limit_text}). Самое время отдохнуть!"
         )
+
+    def _check_game_limits(self) -> None:
+        """Уведомляет о достижении индивидуального дневного лимита по игре."""
+        try:
+            limits = self.db.get_games_with_limits()
+        except Exception as e:
+            logger.warning("Не удалось получить лимиты по играм: %s", e)
+            return
+        if not limits:
+            return
+
+        today = date.today()
+        for game in limits:
+            game_id = game.get('id')
+            minutes = int(game.get('daily_limit_minutes') or 0)
+            if not game_id or minutes <= 0:
+                continue
+            if self._game_limit_notified.get(game_id) == today:
+                continue
+
+            limit_seconds = minutes * 60
+            with self.lock:
+                played = 0
+                try:
+                    played = self.db.get_game_seconds_for_day(game_id, today)
+                except Exception as e:
+                    logger.warning("Не удалось получить время игры %s за день: %s", game_id, e)
+                info = self.active_sessions.get(game_id)
+                if info:
+                    played += max(
+                        info.get('current_seconds', 0) - info.get('last_flushed_seconds', 0), 0
+                    )
+
+            if played >= limit_seconds:
+                self._game_limit_notified[game_id] = today
+                name = game.get('display_name') or game.get('exe_name') or 'Игра'
+                self.notify(
+                    "GameTimeTracker",
+                    f"⏳ Достигнут дневной лимит по игре «{name}» "
+                    f"({format_duration(limit_seconds)}). Пора сделать перерыв!"
+                )
+
+    def _check_limits(self) -> None:
+        """
+        Проверяет все лимиты (общий и по играм) не чаще, чем раз в
+        `daily_limit_check_interval` секунд: лимиты измеряются в минутах,
+        а лишние запросы к БД каждую секунду ни к чему.
+        """
+        now = time.monotonic()
+        if now - self._last_daily_limit_check < self.daily_limit_check_interval:
+            return
+        self._last_daily_limit_check = now
+        self._check_daily_limit()
+        self._check_game_limits()
 
     def ignore_exe(self, exe_name: str) -> None:
         """Добавляет имя файла в список игнорируемых, чтобы не предлагать его снова, и сохраняет в БД"""
@@ -522,9 +571,9 @@ class GameTracker:
                         total_seconds = initial_sec + session_info['current_seconds']
                         self.on_tick(game_id, total_seconds, False)
 
-            # 1b. Проверяем дневной лимит игрового времени
+            # 1b. Проверяем лимиты игрового времени (общий и по играм)
             if self.active_sessions:
-                self._check_daily_limit()
+                self._check_limits()
 
             # 2. Создаём новые сессии для вновь запущенных игр
             for game_id, proc_info in tracked_games.items():

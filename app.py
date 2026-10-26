@@ -1,8 +1,10 @@
 import logging
 import os
 import sys
+from datetime import date
 
 from database import Database
+from digest import format_weekly_digest, is_weekly_digest_due
 from settings import AppSettings
 from tracker import GameTracker
 from tray import SystemTray
@@ -13,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 # Как часто обновлять подсказку иконки в трее (мс)
 TRAY_TOOLTIP_INTERVAL_MS = 60_000
+
+# Задержка перед проверкой еженедельной сводки после старта (мс):
+# даём приложению и трею полностью инициализироваться.
+WEEKLY_DIGEST_DELAY_MS = 3_000
 
 
 get_app_dir = get_base_dir
@@ -32,6 +38,7 @@ class App:
         self._is_exiting = False
         self._background_notified = False
         self._tooltip_job = None
+        self._weekly_digest_job = None
 
         # Автоматическая резервная копия при запуске (защита от потери данных)
         self._create_startup_backup()
@@ -40,6 +47,31 @@ class App:
         self._init_tracker()
         self._init_tray()
         self.window.protocol("WM_DELETE_WINDOW", self.on_window_close)
+
+    def _maybe_send_weekly_digest(self) -> None:
+        """
+        Раз в неделю показывает ненавязчивую сводку игровой активности.
+
+        Отправка не чаще одного раза в 7 дней (дата хранится в настройках),
+        без активности за период сводка не отправляется.
+        """
+        try:
+            self._weekly_digest_job = None
+            if self._is_exiting or not self.settings.weekly_summary_enabled:
+                return
+            if not is_weekly_digest_due(self.settings.last_weekly_summary_date):
+                return
+            summary = self.db.get_weekly_digest()
+            if int(summary.get('total_seconds') or 0) <= 0:
+                return
+            message = format_weekly_digest(summary)
+            if self.tray is not None:
+                self.tray.show_notification("Итоги недели", message)
+            else:
+                logger.info("Итоги недели: %s", message)
+            self.settings.last_weekly_summary_date = date.today().isoformat()
+        except Exception as e:
+            logger.warning("Не удалось отправить еженедельную сводку: %s", e)
 
     def _create_startup_backup(self) -> None:
         """Создаёт ротационную резервную копию БД при запуске приложения."""
@@ -95,6 +127,15 @@ class App:
         if self.tracker:
             self.tracker.tray = self.tray
         self.tray.start()
+        # Еженедельная сводка — после полной инициализации UI и трея
+        if self.window is not None:
+            try:
+                self._weekly_digest_job = self.window.after(
+                    WEEKLY_DIGEST_DELAY_MS, self._maybe_send_weekly_digest
+                )
+            except Exception:
+                pass
+
         if self.settings.minimize_to_tray_on_start:
             self._background_notified = True
             self.window.after(100, self.window.hide_to_tray)
@@ -182,34 +223,35 @@ class App:
         self._is_exiting = True
 
         # 0. Останавливаем отложенные задачи Tkinter
-        tooltip_job = getattr(self, '_tooltip_job', None)
-        if tooltip_job is not None and getattr(self, 'window', None):
-            try:
-                self.window.after_cancel(tooltip_job)
-            except Exception:
-                pass
-            self._tooltip_job = None
+        for job_attr in ('_weekly_digest_job', '_tooltip_job'):
+            job = getattr(self, job_attr, None)
+            if job is not None and getattr(self, 'window', None):
+                try:
+                    self.window.after_cancel(job)
+                except Exception:
+                    pass
+                setattr(self, job_attr, None)
 
         # 1. Остановка трекера (сохраняет накопленные данные сессий в БД)
         if self.tracker:
             try:
                 self.tracker.stop()
             except Exception as e:
-                print(f"Ошибка при остановке трекера: {e}")
+                logger.warning("Ошибка при остановке трекера: %s", e)
 
         # 2. Остановка трея
         if self.tray:
             try:
                 self.tray.stop()
             except Exception as e:
-                print(f"Ошибка при остановке трея: {e}")
+                logger.warning("Ошибка при остановке трея: %s", e)
 
         # 3. Закрытие соединения с базой данных
         if self.db:
             try:
                 self.db.close()
             except Exception as e:
-                print(f"Ошибка при закрытии базы данных: {e}")
+                logger.warning("Ошибка при закрытии базы данных: %s", e)
 
         # 4. Завершение работы Tkinter и уничтожение главного окна
         if self.window:
@@ -217,7 +259,7 @@ class App:
                 self.window.quit()
                 self.window.destroy()
             except Exception as e:
-                print(f"Ошибка при уничтожении окна: {e}")
+                logger.warning("Ошибка при уничтожении окна: %s", e)
 
         # 5. Завершение процесса
         sys.exit(0)

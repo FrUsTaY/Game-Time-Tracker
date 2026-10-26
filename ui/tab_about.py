@@ -10,7 +10,7 @@ from PIL import Image
 
 from utils import resource_path
 
-APP_VERSION = "v1.3.0"
+APP_VERSION = "v1.4.0"
 
 
 class TabAbout(ctk.CTkFrame):

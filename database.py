@@ -5,6 +5,7 @@
 
 import csv
 import html
+import json
 import logging
 import os
 import sqlite3
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Версия схемы БД. Увеличивается при изменении структуры таблиц,
 # чтобы существующие базы данных можно было аккуратно мигрировать.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class Database:
@@ -204,6 +205,8 @@ class Database:
             changed |= self._ensure_column("games", "is_archived", "INTEGER DEFAULT 0")
             changed |= self._ensure_column("games", "archived_at", "TEXT")
             changed |= self._ensure_column("games", "launch_count", "INTEGER DEFAULT 0")
+            # v3: индивидуальный дневной лимит для конкретной игры (NULL — без лимита)
+            changed |= self._ensure_column("games", "daily_limit_minutes", "INTEGER")
             changed |= self._ensure_column("sessions", "duration_seconds", "INTEGER DEFAULT 0")
 
             if self.get_schema_version() < SCHEMA_VERSION:
@@ -351,6 +354,95 @@ class Database:
                 UPDATE games SET icon_path = ? WHERE id = ?
             ''', (icon_path, game_id))
             self.conn.commit()
+
+    def set_game_daily_limit(self, game_id: int, minutes: Optional[int]) -> None:
+        """
+        Задаёт индивидуальный дневной лимит игры в минутах.
+
+        Args:
+            minutes: минуты (>= 1) или None, чтобы снять лимит.
+        """
+        with self.lock:
+            if minutes is None:
+                self.conn.execute(
+                    "UPDATE games SET daily_limit_minutes = NULL WHERE id = ?", (game_id,)
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE games SET daily_limit_minutes = ? WHERE id = ?",
+                    (max(int(minutes), 1), game_id),
+                )
+            self.conn.commit()
+
+    def get_games_with_limits(self, include_archived: bool = False) -> List[Dict[str, Any]]:
+        """Возвращает игры, для которых задан индивидуальный дневной лимит."""
+        with self.lock:
+            query = '''
+                SELECT id, display_name, exe_name, daily_limit_minutes
+                FROM games
+                WHERE daily_limit_minutes IS NOT NULL AND daily_limit_minutes > 0
+            '''
+            if not include_archived:
+                query += ' AND is_archived = 0'
+            query += ' ORDER BY display_name'
+            rows = self.conn.execute(query).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_game_seconds_for_day(self, game_id: int, target_date: date) -> int:
+        """Игровое время конкретной игры за день (с делением сессий через полночь)."""
+        total = 0
+        for session in self._get_sessions_overlapping(target_date, target_date, True):
+            if session.get('game_id') != game_id:
+                continue
+            start, end, duration = self._session_bounds(session)
+            total += self._split_interval_by_day(start, end, duration).get(target_date, 0)
+        return total
+
+    # ---------- Итоги недели ----------
+
+    def get_weekly_digest(self, today: Optional[date] = None,
+                          include_archived: bool = True) -> Dict[str, Any]:
+        """
+        Сводка за последние 7 дней для еженедельного уведомления.
+
+        Returns:
+            Словарь: total_seconds, prev_week_seconds, delta_seconds,
+            top_game, top_game_seconds, active_days, streak, best_day,
+            best_day_seconds, period_start, period_end.
+        """
+        period_end = today or date.today()
+        period_start = period_end - timedelta(days=6)
+        daily = self.get_daily_totals(period_start, period_end, include_archived)
+        total = sum(daily.values())
+
+        prev_start = period_start - timedelta(days=7)
+        prev_total = self.get_period_total_seconds(
+            prev_start, period_start - timedelta(days=1), include_archived
+        )
+
+        game_totals: Dict[str, int] = {}
+        for day_map in self.get_day_breakdowns(period_start, period_end, include_archived).values():
+            for name, seconds in day_map.items():
+                game_totals[name] = game_totals.get(name, 0) + seconds
+        top_game, top_seconds = ("", 0)
+        if game_totals:
+            top_game, top_seconds = max(game_totals.items(), key=lambda item: item[1])
+
+        best_day = max(daily.items(), key=lambda item: item[1]) if daily else (None, 0)
+
+        return {
+            'total_seconds': total,
+            'prev_week_seconds': prev_total,
+            'delta_seconds': total - prev_total,
+            'top_game': top_game,
+            'top_game_seconds': top_seconds,
+            'active_days': sum(1 for secs in daily.values() if secs > 0),
+            'streak': self.get_current_streak(period_end, include_archived),
+            'best_day': best_day[0],
+            'best_day_seconds': best_day[1],
+            'period_start': period_start,
+            'period_end': period_end,
+        }
 
     # ---------- Работа с сессиями ----------
 
@@ -809,6 +901,177 @@ class Database:
             'streak': self.get_current_streak(today, include_archived),
             'active_days': sum(1 for secs in totals.values() if secs > 0),
             'period_total': sum(totals.values()),
+        }
+
+    # ---------- Полный экспорт / импорт (JSON) ----------
+
+    DATA_FORMAT = "gametimetracker-data"
+    DATA_FORMAT_VERSION = 1
+
+    def export_data_json(self, filepath: str) -> bool:
+        """
+        Экспортирует все данные приложения в JSON-файл.
+
+        В отличие от CSV-экспорта (только история сессий), JSON содержит полный
+        снимок: игры с накопленным временем, сессии и список игнорируемых
+        процессов — файл можно перенести на другой компьютер и импортировать.
+        """
+        try:
+            with self.lock:
+                games = [dict(row) for row in self.conn.execute(
+                    "SELECT * FROM games ORDER BY id"
+                ).fetchall()]
+                sessions = [dict(row) for row in self.conn.execute(
+                    "SELECT * FROM sessions ORDER BY id"
+                ).fetchall()]
+                ignored = [dict(row) for row in self.conn.execute(
+                    "SELECT * FROM ignored_processes ORDER BY exe_name"
+                ).fetchall()]
+
+            payload = {
+                "format": self.DATA_FORMAT,
+                "format_version": self.DATA_FORMAT_VERSION,
+                "schema_version": self.get_schema_version(),
+                "exported_at": self._get_current_datetime(),
+                "games": games,
+                "sessions": sessions,
+                "ignored_processes": ignored,
+            }
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            logger.info("Данные экспортированы в JSON: %s", filepath)
+            return True
+        except Exception as e:
+            logger.exception("Ошибка экспорта JSON: %s", e)
+            return False
+
+    def import_data_json(self, filepath: str, replace: bool = True,
+                         auto_backup: bool = True) -> Dict[str, Any]:
+        """
+        Импортирует данные из JSON-файла, созданного `export_data_json`.
+
+        Args:
+            filepath: путь к JSON-файлу.
+            replace: True — заменить текущие игры и сессии, False — добавить новые.
+            auto_backup: создать резервную копию текущей БД перед заменой.
+
+        Returns:
+            Сводка импорта: games, sessions, ignored, backup.
+
+        Raises:
+            ValueError: если файл не является экспортом GameTimeTracker.
+        """
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            raise ValueError(f"Не удалось прочитать файл: {e}") from e
+
+        if not isinstance(payload, dict) or payload.get("format") != self.DATA_FORMAT:
+            raise ValueError("Файл не является экспортом GameTimeTracker")
+        if int(payload.get("format_version", 0)) > self.DATA_FORMAT_VERSION:
+            raise ValueError("Файл создан более новой версией приложения")
+
+        games = payload.get("games") or []
+        sessions = payload.get("sessions") or []
+        ignored = payload.get("ignored_processes") or []
+
+        backup_path = None
+        if auto_backup and replace:
+            backup_path = self.create_rotating_backup()
+
+        imported_games = 0
+        imported_sessions = 0
+        imported_ignored = 0
+
+        with self.lock:
+            try:
+                with self.conn:  # транзакция: при ошибке всё откатится
+                    if replace:
+                        self.conn.execute("DELETE FROM sessions")
+                        self.conn.execute("DELETE FROM games")
+                        self.conn.execute("DELETE FROM ignored_processes")
+
+                    id_map: Dict[int, int] = {}
+                    for game in games:
+                        exe_name = str(game.get("exe_name") or "").strip().lower()
+                        if not exe_name:
+                            continue
+                        display_name = str(game.get("display_name") or exe_name)
+                        existing = None if replace else self.conn.execute(
+                            "SELECT id FROM games WHERE exe_name = ?", (exe_name,)
+                        ).fetchone()
+                        if existing:
+                            id_map[int(game.get("id", 0))] = int(existing[0])
+                            continue
+                        cursor = self.conn.execute(
+                            '''
+                            INSERT INTO games (
+                                exe_name, display_name, exe_path, icon_path, total_seconds,
+                                last_launched, added_at, is_archived, archived_at,
+                                launch_count, daily_limit_minutes
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''',
+                            (
+                                exe_name,
+                                display_name,
+                                game.get("exe_path"),
+                                None,  # пути к иконкам не переносимы между машинами
+                                int(game.get("total_seconds") or 0),
+                                game.get("last_launched"),
+                                game.get("added_at") or self._get_current_datetime(),
+                                int(game.get("is_archived") or 0),
+                                game.get("archived_at"),
+                                int(game.get("launch_count") or 0),
+                                game.get("daily_limit_minutes"),
+                            ),
+                        )
+                        if game.get("id") is not None:
+                            id_map[int(game["id"])] = int(cursor.lastrowid)
+                        imported_games += 1
+
+                    for session in sessions:
+                        old_game_id = session.get("game_id")
+                        new_game_id = id_map.get(int(old_game_id)) if old_game_id is not None else None
+                        if new_game_id is None:
+                            continue
+                        self.conn.execute(
+                            '''
+                            INSERT INTO sessions (game_id, started_at, ended_at, duration_seconds)
+                            VALUES (?, ?, ?, ?)
+                            ''',
+                            (
+                                new_game_id,
+                                session.get("started_at") or self._get_current_datetime(),
+                                session.get("ended_at"),
+                                int(session.get("duration_seconds") or 0),
+                            ),
+                        )
+                        imported_sessions += 1
+
+                    for item in ignored:
+                        exe_name = str(item.get("exe_name") or "").strip().lower()
+                        if not exe_name:
+                            continue
+                        self.conn.execute(
+                            "INSERT OR REPLACE INTO ignored_processes (exe_name, ignored_at) "
+                            "VALUES (?, ?)",
+                            (exe_name, item.get("ignored_at") or self._get_current_datetime()),
+                        )
+                        imported_ignored += 1
+            except Exception:
+                logger.exception("Ошибка импорта JSON, изменения откачены")
+                raise
+
+        logger.info(
+            "Импорт JSON завершён: игр %s, сессий %s, игноров %s",
+            imported_games, imported_sessions, imported_ignored,
+        )
+        return {
+            "games": imported_games,
+            "sessions": imported_sessions,
+            "ignored": imported_ignored,
+            "backup": backup_path,
         }
 
     # ---------- Экспорт ----------

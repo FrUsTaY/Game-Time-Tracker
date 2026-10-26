@@ -5,6 +5,7 @@
 
 import os
 import sys
+from typing import Optional
 
 try:  # winreg доступен только в Windows — это позволяет запускать тесты на Linux/CI
     import winreg
@@ -23,6 +24,7 @@ DEFAULT_DAILY_LIMIT_ENABLED = False
 DEFAULT_DAILY_LIMIT_MINUTES = 180
 DEFAULT_BACKUP_ON_STARTUP = True
 DEFAULT_BACKUP_KEEP = 7
+DEFAULT_WEEKLY_SUMMARY_ENABLED = True
 
 
 class AppSettings:
@@ -71,6 +73,20 @@ class AppSettings:
         except ValueError:
             self._cache[key] = default
             return default
+
+    def _get_str(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        """Получить строковое значение из БД (с кэшированием)."""
+        if key in self._cache:
+            return self._cache[key]
+        val = self.db.get_setting(key)
+        res = default if val is None else val
+        self._cache[key] = res
+        return res
+
+    def _set_str(self, key: str, value: Optional[str]) -> None:
+        """Сохранить строковое значение в БД."""
+        self.db.set_setting(key, '' if value is None else str(value))
+        self._cache[key] = value
 
     def _set_int(self, key: str, value: int) -> None:
         """Сохранить целочисленное значение в БД"""
@@ -246,6 +262,27 @@ class AppSettings:
         if value < 5:
             value = 5
         self._set_int("daily_limit_minutes", value)
+
+    # ----- Еженедельная сводка -----
+
+    @property
+    def weekly_summary_enabled(self) -> bool:
+        """Отправлять еженедельную сводку игровой активности."""
+        return self._get_bool("weekly_summary_enabled", DEFAULT_WEEKLY_SUMMARY_ENABLED)
+
+    @weekly_summary_enabled.setter
+    def weekly_summary_enabled(self, value: bool) -> None:
+        self._set_bool("weekly_summary_enabled", value)
+
+    @property
+    def last_weekly_summary_date(self) -> Optional[str]:
+        """Дата последней отправленной еженедельной сводки (ISO) или None."""
+        value = self._get_str("last_weekly_summary_date")
+        return value or None
+
+    @last_weekly_summary_date.setter
+    def last_weekly_summary_date(self, value: Optional[str]) -> None:
+        self._set_str("last_weekly_summary_date", value)
 
     # ----- Резервное копирование -----
 

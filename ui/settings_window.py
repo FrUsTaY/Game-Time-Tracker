@@ -20,7 +20,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.settings = settings
 
         self.title("Настройки GameTimeTracker")
-        self.geometry("620x640")
+        self.geometry("640x700")
         self.resizable(False, False)
         self.transient(parent)
         # Скрываем окно до позиционирования
@@ -135,6 +135,13 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkLabel(minutes_frame, text="минут", text_color="#e0e0e0").pack(side="left")
         self.minutes_entry = minutes_entry
 
+        self.vars["weekly_summary_enabled"] = ctk.BooleanVar()
+        weekly_switch = ctk.CTkSwitch(
+            main_frame, text="Еженедельная сводка активности (раз в 7 дней)",
+            variable=self.vars["weekly_summary_enabled"], text_color="#e0e0e0"
+        )
+        weekly_switch.pack(anchor="w", padx=20, pady=(10, 10))
+
         # ---- Дневной лимит ----
         self._add_section(main_frame, "Дневной лимит")
         self.vars["daily_limit_enabled"] = ctk.BooleanVar()
@@ -155,6 +162,36 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         self.limit_entry.pack(side="left", padx=5)
         ctk.CTkLabel(limit_frame, text="минут", text_color="#e0e0e0").pack(side="left")
+
+        # ---- Лимиты по играм ----
+        self._add_section(main_frame, "Лимиты по играм")
+        ctk.CTkLabel(
+            main_frame,
+            text="Индивидуальный дневной лимит для конкретной игры:",
+            font=("Segoe UI", 11), text_color="#888888"
+        ).pack(anchor="w", padx=20, pady=(0, 5))
+
+        game_limit_row = ctk.CTkFrame(main_frame, fg_color="transparent")
+        game_limit_row.pack(anchor="w", padx=20, pady=(0, 5), fill="x")
+        self.game_limit_var = ctk.StringVar(value="—")
+        self.game_limit_menu = ctk.CTkOptionMenu(
+            game_limit_row, values=["—"], variable=self.game_limit_var,
+            width=220, fg_color="#1a1a2e", button_color="#2a2a4e"
+        )
+        self.game_limit_menu.pack(side="left", padx=(0, 5))
+        self.game_limit_entry = ctk.CTkEntry(game_limit_row, width=60, justify="center")
+        self.game_limit_entry.pack(side="left", padx=5)
+        ctk.CTkLabel(game_limit_row, text="мин", text_color="#e0e0e0").pack(side="left", padx=(0, 5))
+        ctk.CTkButton(
+            game_limit_row, text="Сохранить", width=90, height=28,
+            command=self._save_game_limit, fg_color="#00d4ff",
+            hover_color="#0099cc", text_color="#0d0d0d"
+        ).pack(side="left", padx=2)
+
+        self.game_limits_frame = ctk.CTkFrame(main_frame, fg_color="#1a1a2e", corner_radius=8)
+        self.game_limits_frame.pack(anchor="w", padx=20, pady=(5, 10), fill="x")
+        self._games_by_title = {}
+        self._refresh_game_limits()
 
         # ---- Не отслеживаются ----
         self._add_section(main_frame, "Не отслеживаются")
@@ -189,6 +226,22 @@ class SettingsWindow(ctk.CTkToplevel):
             text_color="#7b2fff", hover_color="#1a1a2e", height=35
         )
         backup_btn.pack(fill="x", pady=2)
+
+        export_json_btn = ctk.CTkButton(
+            btn_frame, text="⬇ Экспортировать всё в JSON",
+            command=self.export_json, fg_color="transparent",
+            border_color="#00ff88", border_width=1,
+            text_color="#00ff88", hover_color="#1a1a2e", height=35
+        )
+        export_json_btn.pack(fill="x", pady=2)
+
+        import_json_btn = ctk.CTkButton(
+            btn_frame, text="⬆ Импортировать данные из JSON",
+            command=self.import_json, fg_color="transparent",
+            border_color="#ff4444", border_width=1,
+            text_color="#ff4444", hover_color="#1a1a2e", height=35
+        )
+        import_json_btn.pack(fill="x", pady=2)
 
         self.vars["backup_on_startup"] = ctk.BooleanVar()
         backup_switch = ctk.CTkSwitch(
@@ -256,6 +309,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.vars["daily_limit_enabled"].set(self.settings.daily_limit_enabled)
         self.vars["daily_limit_minutes"].set(str(self.settings.daily_limit_minutes))
         self.vars["backup_on_startup"].set(self.settings.backup_on_startup)
+        self.vars["weekly_summary_enabled"].set(self.settings.weekly_summary_enabled)
         self._toggle_long_session_entry()
         self._toggle_idle_entry()
         self._toggle_limit_entry()
@@ -372,7 +426,157 @@ class SettingsWindow(ctk.CTkToplevel):
         self.settings.daily_limit_enabled = self._var_bool("daily_limit_enabled", self.settings.daily_limit_enabled)
         self._read_int("daily_limit_minutes", lambda v: setattr(self.settings, 'daily_limit_minutes', v), 180)
         self.settings.backup_on_startup = self._var_bool("backup_on_startup", self.settings.backup_on_startup)
+        self.settings.weekly_summary_enabled = self._var_bool(
+            "weekly_summary_enabled", self.settings.weekly_summary_enabled
+        )
         self.destroy()
+
+    # ----- Лимиты по играм -----
+
+    def _refresh_game_limits(self):
+        """Обновляет список игр и текущих индивидуальных лимитов."""
+        try:
+            games = self.db.get_all_games(archived=False) if self.db else []
+        except Exception:
+            games = []
+        self._games_by_title = {g['display_name']: g for g in games}
+        values = list(self._games_by_title.keys()) or ["—"]
+        try:
+            self.game_limit_menu.configure(values=values)
+            if self.game_limit_var.get() not in values:
+                self.game_limit_var.set(values[0])
+        except Exception:
+            pass
+
+        for widget in self.game_limits_frame.winfo_children():
+            widget.destroy()
+
+        try:
+            limits = self.db.get_games_with_limits() if self.db else []
+        except Exception:
+            limits = []
+
+        if not limits:
+            ctk.CTkLabel(
+                self.game_limits_frame,
+                text="Индивидуальные лимиты не заданы",
+                font=("Segoe UI", 11), text_color="#666666"
+            ).pack(pady=8)
+            return
+
+        for row in limits:
+            item = ctk.CTkFrame(self.game_limits_frame, fg_color="transparent")
+            item.pack(fill="x", padx=10, pady=3)
+            ctk.CTkLabel(
+                item, text=f"•  {row['display_name']}",
+                font=("Consolas", 12), text_color="#e0e0e0"
+            ).pack(side="left", padx=5)
+            ctk.CTkLabel(
+                item, text=f"{row['daily_limit_minutes']} мин",
+                font=("Consolas", 12), text_color="#00d4ff"
+            ).pack(side="left", padx=5)
+            ctk.CTkButton(
+                item, text="Снять", width=80, height=24,
+                fg_color="#333333", hover_color="#555555",
+                command=lambda gid=row['id']: self._reset_game_limit(gid)
+            ).pack(side="right", padx=5)
+
+    def _selected_game(self):
+        return self._games_by_title.get(self.game_limit_var.get())
+
+    def _save_game_limit(self):
+        game = self._selected_game()
+        if not game:
+            messagebox.showwarning("Лимит", "Сначала добавьте игры в библиотеку")
+            return
+        raw = self.game_limit_entry.get().strip()
+        try:
+            minutes = int(raw)
+        except (TypeError, ValueError):
+            messagebox.showerror("Лимит", "Введите целое число минут (например, 90)")
+            return
+        if minutes < 1:
+            minutes = 1
+        self.db.set_game_daily_limit(game['id'], minutes)
+        self._refresh_game_limits()
+        messagebox.showinfo("Лимит сохранён", f"«{game['display_name']}» — {minutes} мин в день")
+
+    def _reset_game_limit(self, game_id):
+        self.db.set_game_daily_limit(game_id, None)
+        self._refresh_game_limits()
+
+    def refresh_dynamic_sections(self):
+        """Обновляет списки, зависящие от содержимого БД (игры, игнорируемые)."""
+        self._refresh_game_limits()
+        self._refresh_ignored_list()
+
+    # ----- Экспорт / импорт -----
+
+    def _refresh_main_tabs(self):
+        """Обновляет данные вкладок главного окна после импорта."""
+        main = self.master
+        for tab in getattr(main, 'tabs_cache', {}).values():
+            try:
+                for method in ('refresh_games', 'load_stats', 'load_month_data', 'refresh'):
+                    if hasattr(tab, method):
+                        getattr(tab, method)()
+                        break
+            except Exception:
+                continue
+
+    def export_json(self):
+        filepath = filedialog.asksaveasfilename(
+            title="Экспорт всех данных в JSON", defaultextension=".json",
+            initialfile="gametimetracker_data.json",
+            filetypes=[("JSON файлы", "*.json"), ("Все файлы", "*.*")]
+        )
+        if not filepath:
+            return
+        if self.db.export_data_json(filepath):
+            messagebox.showinfo("Экспорт", f"Данные сохранены:\n{filepath}")
+        else:
+            messagebox.showerror("Ошибка", "Не удалось экспортировать данные")
+
+    def import_json(self):
+        filepath = filedialog.askopenfilename(
+            title="Импорт данных из JSON",
+            filetypes=[("JSON файлы", "*.json"), ("Все файлы", "*.*")]
+        )
+        if not filepath:
+            return
+        if not messagebox.askyesno(
+            "Импорт данных",
+            "Текущие игры и сессии будут заменены данными из файла.\n\n"
+            "Перед импортом автоматически создаётся резервная копия базы.\nПродолжить?"
+        ):
+            return
+        try:
+            result = self.db.import_data_json(filepath, replace=True, auto_backup=True)
+        except Exception as e:
+            messagebox.showerror("Ошибка импорта", str(e))
+            return
+
+        # Активные сессии ссылаются на старые ID игр — после замены данных
+        # они неактуальны, поэтому сбрасываем их (БД уже заменена импортом).
+        tracker = getattr(self.master, 'tracker', None)
+        if tracker is not None:
+            try:
+                with tracker.lock:
+                    tracker.active_sessions.clear()
+            except Exception:
+                pass
+
+        self._refresh_main_tabs()
+        self.refresh_dynamic_sections()
+        message = (
+            f"Импортировано игр: {result['games']}\n"
+            f"Сессий: {result['sessions']}\n"
+            f"Игнорируемых процессов: {result['ignored']}"
+        )
+        if result.get('backup'):
+            message += f"\n\nРезервная копия:\n{result['backup']}"
+        message += "\n\nЕсли игра запущена прямо сейчас, перезапустите приложение."
+        messagebox.showinfo("Импорт завершён", message)
 
     def export_csv(self):
         filepath = filedialog.asksaveasfilename(
