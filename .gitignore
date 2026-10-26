@@ -1,14 +1,32 @@
-tests/__pycache__
-*.pyc
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.class
 .pytest_cache/
 .coverage
+htmlcov/
+.ruff_cache/
+.venv/
+venv/
+
+# Сборка
 build/
 dist/
+*.spec.bak
+*.zip
+
+# Данные приложения (БД, журналы, бэкапы, иконки игр)
 data/
 *.db
 *.db-journal
-*.zip
+*.db-wal
+*.db-shm
+
+# IDE / ОС
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Arena/локальные артефакты
+.arena/

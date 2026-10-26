@@ -1,21 +1,22 @@
 import os
 import sys
-import unittest
 import time
+import unittest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import customtkinter as ctk
+
 from database import Database
 from settings import AppSettings
 from tracker import GameTracker
-from ui.widgets import GameCard
-from ui.tab_games import TabGames
-from ui.tab_archive import TabArchive
-from ui.tab_stats import TabStats
-from ui.tab_calendar import TabCalendar
-from ui.tab_about import TabAbout
 from ui.main_window import MainWindow
+from ui.tab_about import TabAbout
+from ui.tab_archive import TabArchive
+from ui.tab_calendar import TabCalendar
+from ui.tab_games import TabGames
+from ui.tab_stats import TabStats
+from ui.widgets import GameCard
 
 
 class TestAudit2Task3TabsSync(unittest.TestCase):
@@ -161,7 +162,7 @@ class TestAudit2Task4DriftAndIdleTasks(unittest.TestCase):
             with patch.object(self.tracker, '_get_active_window_pid', return_value=1234), \
                  patch.object(self.tracker.db, 'get_all_games', return_value=[{'id': game_id, 'exe_name': 'test_game.exe'}]), \
                  patch('psutil.process_iter', return_value=[]):
-                
+
                 # Прогоняем шаги через прямое обновление логики
                 for step in range(1, 11):
                     current_time += 1.07

@@ -2,19 +2,20 @@
 tests/test_stage3_ux.py — тесты для UX-улучшений Этапа 3 (Задачи 11–15).
 """
 
-import unittest
-from unittest.mock import MagicMock, patch
-import customtkinter as ctk
-from datetime import date
 import os
 import tempfile
+import unittest
+from datetime import date
+from unittest.mock import MagicMock, patch
 
+import customtkinter as ctk
+
+from app import App
 from database import Database
 from settings import AppSettings
 from tracker import GameTracker
-from ui.tab_calendar import TabCalendar, MONTHS_GENITIVE_RU
+from ui.tab_calendar import MONTHS_GENITIVE_RU, TabCalendar
 from ui.tab_games import TabGames
-from app import App
 
 
 class TestStage3UX(unittest.TestCase):

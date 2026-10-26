@@ -10,6 +10,7 @@ except ImportError:
 import settings
 from settings import AppSettings
 
+
 class TestAppSettings(unittest.TestCase):
 
     def setUp(self):

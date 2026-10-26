@@ -3,13 +3,22 @@
 Содержит класс Database для всех операций с БД.
 """
 
-import sqlite3
 import csv
+import html
+import logging
 import os
+import sqlite3
 import threading
-from datetime import datetime, date
-from typing import List, Dict, Optional, Any
-from utils import get_base_dir
+from datetime import date, datetime, time, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
+from utils import format_duration, get_base_dir
+
+logger = logging.getLogger(__name__)
+
+# Версия схемы БД. Увеличивается при изменении структуры таблиц,
+# чтобы существующие базы данных можно было аккуратно мигрировать.
+SCHEMA_VERSION = 2
 
 
 class Database:
@@ -33,12 +42,35 @@ class Database:
             os.makedirs(db_dir, exist_ok=True)
 
         self.db_path = db_path
+        self._is_memory = db_path == ":memory:" or db_path.startswith("file::memory:")
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        # Включаем поддержку внешних ключей (foreign keys) для SQLite
-        self.conn.execute("PRAGMA foreign_keys = ON")
+        self._configure_connection()
         self._create_tables()
+        self._migrate_schema()
+        self._create_indexes()
         self.cleanup_zombie_sessions()
+
+    def _configure_connection(self) -> None:
+        """
+        Настраивает соединение SQLite для надёжной параллельной работы.
+
+        * foreign_keys — каскадное удаление сессий вместе с игрой;
+        * busy_timeout — вместо мгновенной ошибки «database is locked» SQLite
+          ждёт до 5 секунд, пока другой поток/процесс освободит блокировку;
+        * WAL — позволяет читать базу во время записи (UI не «замирает»,
+          пока трекер сбрасывает прогресс);
+        * synchronous=NORMAL — безопасный компромисс между скоростью и
+          устойчивостью к сбоям при работе в режиме WAL.
+        """
+        self.conn.execute("PRAGMA foreign_keys = ON")
+        self.conn.execute("PRAGMA busy_timeout = 5000")
+        if not self._is_memory:
+            try:
+                self.conn.execute("PRAGMA journal_mode = WAL")
+                self.conn.execute("PRAGMA synchronous = NORMAL")
+            except sqlite3.DatabaseError as e:  # pragma: no cover - редкие ФС
+                logger.warning("Не удалось включить WAL-режим: %s", e)
 
     def _create_tables(self) -> None:
         """Создание всех необходимых таблиц, если они не существуют"""
@@ -126,6 +158,62 @@ class Database:
 
             self.conn.commit()
 
+    def _create_indexes(self) -> None:
+        """Создаёт индексы, зависящие от колонок, добавленных миграциями."""
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_ended_at ON sessions (ended_at)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_games_is_archived ON games (is_archived)"
+            )
+            self.conn.commit()
+
+    # ---------- Версионирование схемы ----------
+
+    def _column_exists(self, table: str, column: str) -> bool:
+        """Проверяет наличие колонки в таблице."""
+        cursor = self.conn.execute(f"PRAGMA table_info({table})")
+        return any(row[1] == column for row in cursor.fetchall())
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> bool:
+        """Добавляет колонку, если её нет (миграция старых баз данных)."""
+        if self._column_exists(table, column):
+            return False
+        self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        logger.info("Миграция БД: добавлена колонка %s.%s", table, column)
+        return True
+
+    def get_schema_version(self) -> int:
+        """Возвращает версию схемы БД (PRAGMA user_version)."""
+        row = self.conn.execute("PRAGMA user_version").fetchone()
+        return int(row[0]) if row else 0
+
+    def _migrate_schema(self) -> None:
+        """
+        Приводит схему существующей базы к актуальной версии.
+
+        `CREATE TABLE IF NOT EXISTS` не добавляет новые колонки в уже
+        существующие таблицы, поэтому апгрейд со старых версий приложения
+        без миграций приводил бы к ошибкам «no such column».
+        """
+        with self.lock:
+            changed = False
+            # v1 -> v2: колонки, появившиеся в более поздних версиях приложения
+            changed |= self._ensure_column("games", "is_archived", "INTEGER DEFAULT 0")
+            changed |= self._ensure_column("games", "archived_at", "TEXT")
+            changed |= self._ensure_column("games", "launch_count", "INTEGER DEFAULT 0")
+            changed |= self._ensure_column("sessions", "duration_seconds", "INTEGER DEFAULT 0")
+
+            if self.get_schema_version() < SCHEMA_VERSION:
+                self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                changed = True
+
+            if changed:
+                self.conn.commit()
+                logger.info("Схема БД обновлена до версии %s", SCHEMA_VERSION)
+
     def _get_current_datetime(self) -> str:
         """Возвращает текущую дату и время в формате ISO для SQLite"""
         return datetime.now().isoformat()
@@ -181,16 +269,31 @@ class Database:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def update_game_time(self, game_id: int, seconds_to_add: int) -> None:
-        """Увеличивает общее время игры на seconds_to_add"""
+    def update_game_time(self, game_id: int, seconds_to_add: int,
+                         touch_last_launched: bool = True) -> None:
+        """
+        Увеличивает общее время игры на seconds_to_add.
+
+        Args:
+            touch_last_launched: обновлять ли дату последнего запуска. При
+                периодическом сбросе прогресса (каждые 60 секунд) дату трогать
+                не нужно — иначе «Последний запуск» всегда показывает «сейчас».
+        """
         with self.lock:
             cursor = self.conn.cursor()
-            cursor.execute('''
-                UPDATE games
-                SET total_seconds = total_seconds + ?,
-                    last_launched = ?
-                WHERE id = ?
-            ''', (seconds_to_add, self._get_current_datetime(), game_id))
+            if touch_last_launched:
+                cursor.execute('''
+                    UPDATE games
+                    SET total_seconds = total_seconds + ?,
+                        last_launched = ?
+                    WHERE id = ?
+                ''', (seconds_to_add, self._get_current_datetime(), game_id))
+            else:
+                cursor.execute('''
+                    UPDATE games
+                    SET total_seconds = total_seconds + ?
+                    WHERE id = ?
+                ''', (seconds_to_add, game_id))
             self.conn.commit()
 
     def increment_launch_count(self, game_id: int) -> None:
@@ -510,6 +613,204 @@ class Database:
             ''', (key, value))
             self.conn.commit()
 
+    # ---------- Аналитика по дням ----------
+    #
+    # Важно: сессия может пересекать полночь (например, 23:30 → 01:15).
+    # Раньше такие сессии целиком относились к дню старта, из-за чего
+    # календарь и график активности «съезжали». Методы ниже делят
+    # длительность сессии по фактическим дням пропорционально пересечению.
+
+    @staticmethod
+    def _split_interval_by_day(start: datetime, end: datetime,
+                               total_seconds: int) -> Dict[date, int]:
+        """
+        Делит total_seconds между календарными днями интервала [start, end).
+
+        Сумма значений в результате всегда равна floor(total_seconds)
+        (остаток от округления отдаётся последнему дню).
+        """
+        total_seconds = max(int(total_seconds or 0), 0)
+        if total_seconds == 0:
+            return {}
+        if end <= start:
+            return {start.date(): total_seconds}
+
+        weights: Dict[date, float] = {}
+        cursor = start
+        while cursor < end:
+            next_midnight = datetime.combine(cursor.date() + timedelta(days=1), time.min)
+            segment_end = min(end, next_midnight)
+            weights[cursor.date()] = weights.get(cursor.date(), 0.0) + \
+                (segment_end - cursor).total_seconds()
+            cursor = segment_end
+
+        window = (end - start).total_seconds()
+        days = list(weights.items())
+        result: Dict[date, int] = {}
+        allocated = 0
+        for day, weight in days[:-1]:
+            value = int(total_seconds * weight / window)
+            if value:
+                result[day] = value
+                allocated += value
+        last_day = days[-1][0]
+        result[last_day] = result.get(last_day, 0) + (total_seconds - allocated)
+        return {day: secs for day, secs in result.items() if secs}
+
+    @staticmethod
+    def _session_bounds(session: Dict[str, Any]) -> Tuple[datetime, datetime, int]:
+        """Возвращает (начало, конец, длительность) сессии."""
+        duration = max(int(session.get('duration_seconds') or 0), 0)
+        try:
+            start = datetime.fromisoformat(session['started_at'])
+        except (KeyError, TypeError, ValueError):
+            start = datetime.now()
+        end = None
+        if session.get('ended_at'):
+            try:
+                end = datetime.fromisoformat(session['ended_at'])
+            except (TypeError, ValueError):
+                end = None
+        if end is None or end <= start:
+            end = start + timedelta(seconds=duration)
+        return start, end, duration
+
+    def _get_sessions_overlapping(self, start_date: date, end_date: date,
+                                  include_archived: bool = True) -> List[Dict[str, Any]]:
+        """Возвращает сессии, которые хотя бы частично попадают в диапазон дат."""
+        start_str = start_date.isoformat() + "T00:00:00"
+        end_str = end_date.isoformat() + "T23:59:59.999999"
+        with self.lock:
+            cursor = self.conn.cursor()
+            query = '''
+                SELECT s.*, g.display_name, g.exe_name, g.is_archived
+                FROM sessions s
+                JOIN games g ON s.game_id = g.id
+                WHERE s.duration_seconds > 0
+                  AND s.started_at <= ?
+                  AND (s.ended_at IS NULL OR s.ended_at >= ?)
+            '''
+            if not include_archived:
+                query += ' AND g.is_archived = 0'
+            query += ' ORDER BY s.started_at'
+            cursor.execute(query, (end_str, start_str))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_daily_totals(self, start_date: date, end_date: date,
+                         include_archived: bool = True) -> Dict[date, int]:
+        """
+        Возвращает суммарное игровое время по дням диапазона (включительно).
+
+        В отличие от простой группировки по `started_at`, длительность сессий,
+        пересекающих полночь, распределяется между днями корректно.
+        """
+        totals: Dict[date, int] = {}
+        if end_date < start_date:
+            return totals
+        for session in self._get_sessions_overlapping(start_date, end_date, include_archived):
+            start, end, duration = self._session_bounds(session)
+            for day, seconds in self._split_interval_by_day(start, end, duration).items():
+                if start_date <= day <= end_date:
+                    totals[day] = totals.get(day, 0) + seconds
+        return totals
+
+    def get_day_breakdowns(self, start_date: date, end_date: date,
+                           include_archived: bool = True) -> Dict[date, Dict[str, int]]:
+        """
+        Возвращает разбивку времени по дням и играм за период одним проходом.
+
+        Используется календарём, чтобы не выполнять отдельный запрос на каждый
+        день месяца.
+        """
+        result: Dict[date, Dict[str, int]] = {}
+        if end_date < start_date:
+            return result
+        for session in self._get_sessions_overlapping(start_date, end_date, include_archived):
+            start, end, duration = self._session_bounds(session)
+            name = session.get('display_name') or session.get('exe_name') or 'Неизвестная игра'
+            for day, seconds in self._split_interval_by_day(start, end, duration).items():
+                if start_date <= day <= end_date:
+                    day_map = result.setdefault(day, {})
+                    day_map[name] = day_map.get(name, 0) + seconds
+        return result
+
+    def get_day_breakdown(self, target_date: date,
+                          include_archived: bool = True) -> Dict[str, int]:
+        """Возвращает разбивку игрового времени за день по названиям игр."""
+        return self.get_day_breakdowns(target_date, target_date, include_archived).get(target_date, {})
+
+    def get_period_total_seconds(self, start_date: date, end_date: date,
+                                 include_archived: bool = True) -> int:
+        """Суммарное игровое время за период (с корректным делением сессий по дням)."""
+        return sum(self.get_daily_totals(start_date, end_date, include_archived).values())
+
+    def get_today_seconds(self, include_archived: bool = True,
+                          today: Optional[date] = None) -> int:
+        """Игровое время за сегодня."""
+        target = today or date.today()
+        return self.get_period_total_seconds(target, target, include_archived)
+
+    def get_active_days_count(self, start_date: date, end_date: date,
+                              include_archived: bool = True) -> int:
+        """Количество дней в периоде, в которые была игровая активность."""
+        return sum(1 for secs in self.get_daily_totals(start_date, end_date, include_archived).values()
+                   if secs > 0)
+
+    def get_current_streak(self, reference_date: Optional[date] = None,
+                           include_archived: bool = True,
+                           max_days: int = 3650) -> int:
+        """
+        Длина текущей серии дней подряд с игровой активностью.
+
+        Серия считается продолжающейся, если активность была сегодня или
+        вчера (вчера — чтобы серия не обнулялась утром до первого запуска игры).
+        """
+        reference = reference_date or date.today()
+        start = reference - timedelta(days=max_days)
+        totals = self.get_daily_totals(start, reference, include_archived)
+        if not totals.get(reference) and not totals.get(reference - timedelta(days=1)):
+            return 0
+        day = reference if totals.get(reference) else reference - timedelta(days=1)
+        streak = 0
+        while totals.get(day):
+            streak += 1
+            day -= timedelta(days=1)
+        return streak
+
+    def get_average_daily_seconds(self, days: int = 30, include_archived: bool = True,
+                                  only_active_days: bool = False,
+                                  today: Optional[date] = None) -> int:
+        """Среднее игровое время в день за последние `days` дней."""
+        end = today or date.today()
+        start = end - timedelta(days=max(days, 1) - 1)
+        totals = self.get_daily_totals(start, end, include_archived)
+        if only_active_days:
+            values = [secs for secs in totals.values() if secs > 0]
+            divisor = len(values) or 1
+            return int(sum(values) / divisor)
+        return int(sum(totals.values()) / max(days, 1))
+
+    def get_activity_summary(self, days: int = 30,
+                             include_archived: bool = True) -> Dict[str, int]:
+        """
+        Сводка активности для карточек статистики.
+
+        Returns:
+            Словарь с ключами today, week, avg_daily, streak, active_days, period_total.
+        """
+        today = date.today()
+        period_start = today - timedelta(days=max(days, 1) - 1)
+        totals = self.get_daily_totals(period_start, today, include_archived)
+        week_start = today - timedelta(days=6)
+        return {
+            'today': totals.get(today, 0),
+            'week': sum(secs for day, secs in totals.items() if day >= week_start),
+            'avg_daily': int(sum(totals.values()) / max(days, 1)),
+            'streak': self.get_current_streak(today, include_archived),
+            'active_days': sum(1 for secs in totals.values() if secs > 0),
+            'period_total': sum(totals.values()),
+        }
+
     # ---------- Экспорт ----------
 
     def _sanitize_csv_value(self, value: Any) -> Any:
@@ -555,7 +856,129 @@ class Database:
                     ])
             return True
         except Exception as e:
-            print(f"Ошибка экспорта CSV: {e}")
+            logger.exception("Ошибка экспорта CSV: %s", e)
+            return False
+
+    def export_report_html(self, filepath: str, start_date: date, end_date: date,
+                           include_archived: bool = True) -> bool:
+        """
+        Экспортирует красивый автономный HTML-отчёт за период.
+
+        В отличие от CSV, отчёт содержит сводку, разбивку по играм и по дням,
+        его удобно отправить или открыть в браузере без Excel.
+        Возвращает True в случае успеха.
+        """
+        try:
+            daily = self.get_daily_totals(start_date, end_date, include_archived)
+            game_totals: Dict[str, int] = {}
+            for session in self._get_sessions_overlapping(start_date, end_date, include_archived):
+                start, end, duration = self._session_bounds(session)
+                name = session.get('display_name') or session.get('exe_name') or 'Неизвестная игра'
+                for day, seconds in self._split_interval_by_day(start, end, duration).items():
+                    if start_date <= day <= end_date:
+                        game_totals[name] = game_totals.get(name, 0) + seconds
+
+            total = sum(daily.values())
+            active_days = sum(1 for secs in daily.values() if secs > 0)
+            period_days = (end_date - start_date).days + 1
+            longest = None
+            with self.lock:
+                cursor = self.conn.cursor()
+                query = '''
+                    SELECT s.duration_seconds, g.display_name
+                    FROM sessions s JOIN games g ON s.game_id = g.id
+                    WHERE s.duration_seconds > 0 AND s.started_at <= ?
+                      AND (s.ended_at IS NULL OR s.ended_at >= ?)
+                '''
+                if not include_archived:
+                    query += ' AND g.is_archived = 0'
+                query += ' ORDER BY s.duration_seconds DESC LIMIT 1'
+                cursor.execute(query, (end_date.isoformat() + "T23:59:59.999999",
+                                       start_date.isoformat() + "T00:00:00"))
+                row = cursor.fetchone()
+                longest = dict(row) if row else None
+
+            max_day = max(daily.values()) if daily else 0
+            rows_games = "".join(
+                f"<tr><td>{html.escape(name)}</td>"
+                f"<td class='num'>{format_duration(secs)}</td>"
+                f"<td class='num'>{secs / 3600:.1f} ч</td>"
+                f"<td class='num'>{(secs / total * 100) if total else 0:.1f}%</td></tr>"
+                for name, secs in sorted(game_totals.items(), key=lambda kv: kv[1], reverse=True)
+            ) or "<tr><td colspan='4'>Нет данных за период</td></tr>"
+
+            rows_days = ""
+            day = start_date
+            while day <= end_date:
+                secs = daily.get(day, 0)
+                width = (secs / max_day * 100) if max_day else 0
+                rows_days += (
+                    f"<tr><td>{day.strftime('%d.%m.%Y')}</td>"
+                    f"<td class='num'>{format_duration(secs)}</td>"
+                    f"<td><div class='bar' style='width:{width:.1f}%'></div></td></tr>"
+                )
+                day += timedelta(days=1)
+
+            longest_html = "—"
+            if longest and longest.get('duration_seconds'):
+                longest_html = (f"{html.escape(str(longest.get('display_name') or ''))} — "
+                                f"{format_duration(longest['duration_seconds'])}")
+
+            document = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>GameTimeTracker — отчёт {start_date} — {end_date}</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  body {{ margin: 0; padding: 32px; background: #0d0d0d; color: #e0e0e0;
+         font-family: 'Segoe UI', Arial, sans-serif; }}
+  h1 {{ color: #00d4ff; margin: 0 0 4px; font-size: 26px; }}
+  h2 {{ color: #7b2fff; font-size: 18px; margin-top: 32px; }}
+  .sub {{ color: #888; margin-bottom: 24px; }}
+  .cards {{ display: flex; flex-wrap: wrap; gap: 16px; }}
+  .card {{ flex: 1 1 160px; background: #1a1a2e; border: 1px solid #2a2a4e;
+           border-radius: 12px; padding: 16px; }}
+  .card .cap {{ color: #888; font-size: 12px; text-transform: uppercase; }}
+  .card .val {{ color: #00d4ff; font-size: 22px; font-weight: 700; margin-top: 6px; }}
+  table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
+  th, td {{ padding: 8px 10px; border-bottom: 1px solid #2a2a4e; text-align: left; }}
+  th {{ color: #7b2fff; font-size: 13px; }}
+  td.num {{ text-align: right; font-family: Consolas, monospace; color: #00d4ff; }}
+  .bar {{ height: 10px; min-width: 2px; border-radius: 5px;
+          background: linear-gradient(90deg, #00d4ff, #7b2fff); }}
+  footer {{ margin-top: 32px; color: #666; font-size: 12px; }}
+</style>
+</head>
+<body>
+  <h1>🎮 GameTimeTracker</h1>
+  <div class="sub">Отчёт за период: {start_date.strftime('%d.%m.%Y')} — {end_date.strftime('%d.%m.%Y')}
+    ({period_days} дн.){' · с архивом' if include_archived else ''}</div>
+  <div class="cards">
+    <div class="card"><div class="cap">Всего за период</div><div class="val">{format_duration(total)}</div></div>
+    <div class="card"><div class="cap">Активных дней</div><div class="val">{active_days} из {period_days}</div></div>
+    <div class="card"><div class="cap">Среднее в день</div><div class="val">{format_duration(total // period_days)}</div></div>
+    <div class="card"><div class="cap">Самая долгая сессия</div><div class="val" style="font-size:15px">{longest_html}</div></div>
+  </div>
+  <h2>🏆 Игры за период</h2>
+  <table>
+    <tr><th>Игра</th><th class="num">Время</th><th class="num">Часы</th><th class="num">Доля</th></tr>
+    {rows_games}
+  </table>
+  <h2>📅 Активность по дням</h2>
+  <table>
+    <tr><th>Дата</th><th class="num">Время</th><th>График</th></tr>
+    {rows_days}
+  </table>
+  <footer>Отчёт сформирован {datetime.now().strftime('%d.%m.%Y %H:%M')} · GameTimeTracker</footer>
+</body>
+</html>
+"""
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(document)
+            return True
+        except Exception as e:
+            logger.exception("Ошибка экспорта HTML-отчёта: %s", e)
             return False
 
     def backup_database(self, target_path: str) -> None:
@@ -575,6 +998,47 @@ class Database:
                 self.conn.backup(backup_conn)
             finally:
                 backup_conn.close()
+
+
+    def create_rotating_backup(self, backup_dir: Optional[str] = None,
+                               keep: int = 7) -> Optional[str]:
+        """
+        Создаёт автоматическую резервную копию базы и удаляет устаревшие копии.
+
+        Args:
+            backup_dir: каталог для копий (по умолчанию `data/backups`).
+            keep: сколько последних копий хранить.
+
+        Returns:
+            Путь к созданной копии или None (для in-memory БД / при ошибке).
+        """
+        if self._is_memory:
+            return None
+        try:
+            target_dir = backup_dir or os.path.join(
+                os.path.dirname(self.db_path) or get_base_dir(), "backups"
+            )
+            os.makedirs(target_dir, exist_ok=True)
+            filename = f"gametracker_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            target_path = os.path.join(target_dir, filename)
+            self.backup_database(target_path)
+
+            backups = sorted(
+                (os.path.join(target_dir, name) for name in os.listdir(target_dir)
+                 if name.startswith("gametracker_") and name.endswith(".db")),
+                key=os.path.getmtime,
+                reverse=True,
+            )
+            for stale in backups[max(int(keep), 1):]:
+                try:
+                    os.remove(stale)
+                except OSError:
+                    pass
+            logger.info("Создана резервная копия БД: %s", target_path)
+            return target_path
+        except Exception as e:
+            logger.exception("Ошибка создания резервной копии: %s", e)
+            return None
 
     def close(self) -> None:
         """Закрывает соединение с БД"""

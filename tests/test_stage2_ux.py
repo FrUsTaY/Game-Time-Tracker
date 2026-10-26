@@ -2,19 +2,20 @@
 tests/test_stage2_ux.py — тесты для UX-улучшений Этапа 2 (Задачи 6–10).
 """
 
-import unittest
-from unittest.mock import MagicMock, patch
-import customtkinter as ctk
-from datetime import date, datetime
 import os
 import tempfile
+import unittest
+from datetime import date, datetime
+from unittest.mock import MagicMock, patch
+
+import customtkinter as ctk
 
 from database import Database
 from settings import AppSettings
-from ui.tab_calendar import TabCalendar
 from ui.tab_archive import TabArchive
+from ui.tab_calendar import TabCalendar
 from ui.tab_stats import TabStats
-from ui.widgets import GameCard, ArchiveCard
+from ui.widgets import ArchiveCard, GameCard
 
 
 class TestStage2UX(unittest.TestCase):

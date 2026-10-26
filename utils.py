@@ -30,3 +30,39 @@ def resource_path(relative_path: str) -> str:
         if os.path.exists(bundle_path):
             return os.path.normpath(bundle_path)
     return os.path.normpath(os.path.join(get_base_dir(), relative_path))
+
+
+def format_duration(seconds: int, style: str = "short") -> str:
+    """
+    Форматирует длительность в человекочитаемом виде.
+
+    Args:
+        seconds: количество секунд (отрицательные значения трактуются как 0).
+        style: "short"   — «1 ч 05 мин», «12 мин», «45 сек»;
+               "clock"   — «01:05:12» / «05:12»;
+               "hours"   — «1.5 ч».
+
+    Returns:
+        Строка с отформатированной длительностью.
+    """
+    seconds = max(int(seconds or 0), 0)
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    if style == "clock":
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        return f"{minutes:02d}:{secs:02d}"
+    if style == "hours":
+        return f"{seconds / 3600:.1f} ч"
+    if style != "short":
+        raise ValueError(f"Неизвестный стиль форматирования: {style!r}")
+
+    parts = []
+    if hours:
+        parts.append(f"{hours} ч")
+    if minutes:
+        parts.append(f"{minutes:02d} мин" if hours else f"{minutes} мин")
+    if not parts:
+        parts.append(f"{secs} сек")
+    return " ".join(parts)

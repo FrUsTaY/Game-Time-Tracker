@@ -6,11 +6,12 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import customtkinter as ctk
+
 from database import Database
 from settings import AppSettings
-from tracker import GameTracker, is_system_process, SYSTEM_EXCLUDE_EXES
-from ui.tab_stats import TabStats
+from tracker import SYSTEM_EXCLUDE_EXES, GameTracker, is_system_process
 from ui.tab_calendar import TabCalendar
+from ui.tab_stats import TabStats
 
 
 class TestAudit3Task1SafeDuration(unittest.TestCase):

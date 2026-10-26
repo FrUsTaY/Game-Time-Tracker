@@ -5,11 +5,22 @@ main.py — точка входа в приложение GameTimeTracker.
 Расположение: GameTimeTracker/main.py
 """
 
+import logging
 import sys
-import win32event
-import win32api
-import winerror
 from tkinter import messagebox
+
+try:  # Приложение поддерживает только Windows, но импорт не должен «ронять» тесты
+    import win32api
+    import win32event
+    import winerror
+    WIN32_AVAILABLE = True
+except ImportError:  # pragma: no cover - зависит от платформы
+    win32event = win32api = winerror = None
+    WIN32_AVAILABLE = False
+
+from logging_setup import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 _app_mutex = None
@@ -18,6 +29,8 @@ _app_mutex = None
 def is_already_running():
     """Проверяет, не запущен ли уже другой экземпляр приложения."""
     global _app_mutex
+    if not WIN32_AVAILABLE:
+        return False
     mutex_name = "GameTimeTracker_Mutex_{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
     try:
         # Пытаемся создать мьютекс и сохранить дескриптор в глобальной переменной
@@ -37,6 +50,17 @@ def is_already_running():
 def main():
     """Главная функция."""
     global _app_mutex
+    setup_logging()
+    logger.info("Запуск GameTimeTracker")
+
+    if not WIN32_AVAILABLE:
+        messagebox.showerror(
+            "GameTimeTracker",
+            "Приложение поддерживает только Windows:\n"
+            "требуются модули pywin32 (win32api, win32event)."
+        )
+        sys.exit(1)
+
     if is_already_running():
         messagebox.showwarning(
             "GameTimeTracker",

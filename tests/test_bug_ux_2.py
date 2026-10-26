@@ -11,9 +11,9 @@ from database import Database
 from settings import AppSettings
 from tracker import GameTracker
 from ui.main_window import MainWindow, NotificationsDialog
+from ui.settings_window import SettingsWindow
 from ui.tab_games import TabGames
 from ui.tab_stats import TabStats
-from ui.settings_window import SettingsWindow
 
 
 class TestBugUX2Tasks(unittest.TestCase):

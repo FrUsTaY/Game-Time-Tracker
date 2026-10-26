@@ -4,11 +4,11 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import build
 from database import Database
 from settings import AppSettings
 from ui.settings_window import SettingsWindow
 from ui.tab_games import TabGames
-import build
 
 
 class TestAudit3Task4AutostartSync(unittest.TestCase):

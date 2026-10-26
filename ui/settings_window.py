@@ -2,10 +2,11 @@
 settings_window.py — окно настроек GameTimeTracker.
 """
 
-import customtkinter as ctk
-from tkinter import messagebox, filedialog
 import os
 from datetime import datetime
+from tkinter import filedialog, messagebox
+
+import customtkinter as ctk
 
 from database import Database
 from settings import AppSettings
@@ -19,7 +20,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.settings = settings
 
         self.title("Настройки GameTimeTracker")
-        self.geometry("600x550")
+        self.geometry("620x640")
         self.resizable(False, False)
         self.transient(parent)
         # Скрываем окно до позиционирования
@@ -79,6 +80,34 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         tracking_switch.pack(anchor="w", padx=20, pady=(0, 10))
 
+        # ---- Бездействие (AFK) ----
+        self._add_section(main_frame, "Бездействие (AFK)")
+        self.vars["pause_when_idle"] = ctk.BooleanVar()
+        idle_switch = ctk.CTkSwitch(
+            main_frame, text="Не считать время, если пользователь отошёл",
+            variable=self.vars["pause_when_idle"],
+            command=self._toggle_idle_entry,
+            text_color="#e0e0e0"
+        )
+        idle_switch.pack(anchor="w", padx=20, pady=(0, 5))
+        idle_hint = ctk.CTkLabel(
+            main_frame,
+            text="Время не учитывается, если мышь и клавиатура неактивны дольше порога.\n"
+                 "Полезно, если игра остаётся открытой без присмотра.",
+            font=("Segoe UI", 10), text_color="#888888", justify="left"
+        )
+        idle_hint.pack(anchor="w", padx=35, pady=(0, 5))
+
+        idle_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        idle_frame.pack(anchor="w", padx=35, pady=(0, 10))
+        ctk.CTkLabel(idle_frame, text="Порог бездействия:", text_color="#e0e0e0").pack(side="left")
+        self.vars["idle_threshold_minutes"] = ctk.StringVar()
+        self.idle_entry = ctk.CTkEntry(
+            idle_frame, width=60, textvariable=self.vars["idle_threshold_minutes"], justify="center"
+        )
+        self.idle_entry.pack(side="left", padx=5)
+        ctk.CTkLabel(idle_frame, text="минут", text_color="#e0e0e0").pack(side="left")
+
         # ---- Уведомления ----
         self._add_section(main_frame, "Уведомления")
         self.vars["notify_new_game"] = ctk.BooleanVar()
@@ -105,6 +134,28 @@ class SettingsWindow(ctk.CTkToplevel):
         minutes_entry.pack(side="left", padx=5)
         ctk.CTkLabel(minutes_frame, text="минут", text_color="#e0e0e0").pack(side="left")
         self.minutes_entry = minutes_entry
+
+        # ---- Дневной лимит ----
+        self._add_section(main_frame, "Дневной лимит")
+        self.vars["daily_limit_enabled"] = ctk.BooleanVar()
+        limit_switch = ctk.CTkSwitch(
+            main_frame, text="Напоминать о достижении дневного лимита",
+            variable=self.vars["daily_limit_enabled"],
+            command=self._toggle_limit_entry,
+            text_color="#e0e0e0"
+        )
+        limit_switch.pack(anchor="w", padx=20, pady=(0, 5))
+
+        limit_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        limit_frame.pack(anchor="w", padx=35, pady=(5, 10))
+        ctk.CTkLabel(limit_frame, text="Лимит в день:", text_color="#e0e0e0").pack(side="left")
+        self.vars["daily_limit_minutes"] = ctk.StringVar()
+        self.limit_entry = ctk.CTkEntry(
+            limit_frame, width=60, textvariable=self.vars["daily_limit_minutes"], justify="center"
+        )
+        self.limit_entry.pack(side="left", padx=5)
+        ctk.CTkLabel(limit_frame, text="минут", text_color="#e0e0e0").pack(side="left")
+
         # ---- Не отслеживаются ----
         self._add_section(main_frame, "Не отслеживаются")
         desc_label = ctk.CTkLabel(
@@ -138,6 +189,19 @@ class SettingsWindow(ctk.CTkToplevel):
             text_color="#7b2fff", hover_color="#1a1a2e", height=35
         )
         backup_btn.pack(fill="x", pady=2)
+
+        self.vars["backup_on_startup"] = ctk.BooleanVar()
+        backup_switch = ctk.CTkSwitch(
+            main_frame, text="Автоматическая резервная копия при запуске",
+            variable=self.vars["backup_on_startup"], text_color="#e0e0e0"
+        )
+        backup_switch.pack(anchor="w", padx=20, pady=(5, 0))
+        backup_hint = ctk.CTkLabel(
+            main_frame,
+            text="Копии хранятся в data/backups (по умолчанию — последние 7)",
+            font=("Segoe UI", 10), text_color="#888888"
+        )
+        backup_hint.pack(anchor="w", padx=35, pady=(0, 5))
 
         open_folder_btn = ctk.CTkButton(
             btn_frame, text="📂 Открыть папку с данными",
@@ -187,13 +251,51 @@ class SettingsWindow(ctk.CTkToplevel):
         self.vars["notify_new_game"].set(self.settings.notify_new_game)
         self.vars["notify_long_session"].set(self.settings.notify_long_session)
         self.vars["long_session_minutes"].set(str(self.settings.long_session_minutes))
+        self.vars["pause_when_idle"].set(self.settings.pause_when_idle)
+        self.vars["idle_threshold_minutes"].set(str(self.settings.idle_threshold_minutes))
+        self.vars["daily_limit_enabled"].set(self.settings.daily_limit_enabled)
+        self.vars["daily_limit_minutes"].set(str(self.settings.daily_limit_minutes))
+        self.vars["backup_on_startup"].set(self.settings.backup_on_startup)
         self._toggle_long_session_entry()
+        self._toggle_idle_entry()
+        self._toggle_limit_entry()
 
     def _toggle_long_session_entry(self):
         if self.vars["notify_long_session"].get():
             self.minutes_entry.configure(state="normal")
         else:
             self.minutes_entry.configure(state="disabled")
+
+    def _toggle_idle_entry(self):
+        self.idle_entry.configure(
+            state="normal" if self.vars["pause_when_idle"].get() else "disabled"
+        )
+
+    def _toggle_limit_entry(self):
+        self.limit_entry.configure(
+            state="normal" if self.vars["daily_limit_enabled"].get() else "disabled"
+        )
+
+    def _var_bool(self, key: str, default: bool = False) -> bool:
+        """Безопасно читает булеву переменную (устойчиво к неполному набору vars)."""
+        var = self.vars.get(key)
+        if var is None:
+            return default
+        try:
+            return bool(var.get())
+        except Exception:
+            return default
+
+    def _read_int(self, key: str, setter, fallback: int) -> None:
+        """Аккуратно сохраняет целочисленную настройку из поля ввода."""
+        var = self.vars.get(key)
+        if var is None:
+            return
+        try:
+            value = int(str(var.get()).strip())
+        except (TypeError, ValueError):
+            return
+        setter(value)
 
     def _refresh_ignored_list(self):
         """Обновляет список процессов в секции 'Не отслеживаются'."""
@@ -265,6 +367,11 @@ class SettingsWindow(ctk.CTkToplevel):
             self.settings.long_session_minutes = minutes
         except ValueError:
             pass
+        self.settings.pause_when_idle = self._var_bool("pause_when_idle", self.settings.pause_when_idle)
+        self._read_int("idle_threshold_minutes", lambda v: setattr(self.settings, 'idle_threshold_minutes', v), 5)
+        self.settings.daily_limit_enabled = self._var_bool("daily_limit_enabled", self.settings.daily_limit_enabled)
+        self._read_int("daily_limit_minutes", lambda v: setattr(self.settings, 'daily_limit_minutes', v), 180)
+        self.settings.backup_on_startup = self._var_bool("backup_on_startup", self.settings.backup_on_startup)
         self.destroy()
 
     def export_csv(self):
@@ -293,10 +400,13 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def open_data_folder(self):
         data_dir = os.path.join(get_base_dir(), "data")
-        if os.path.exists(data_dir):
-            os.startfile(data_dir)
-        else:
+        if not os.path.exists(data_dir):
             messagebox.showwarning("Папка не найдена", "Папка data ещё не создана.")
+            return
+        if hasattr(os, "startfile"):
+            os.startfile(data_dir)
+        else:  # не-Windows: просто показываем путь
+            messagebox.showinfo("Папка с данными", data_dir)
 
     def exit_app(self):
         if messagebox.askyesno("Выход", "Вы уверены, что хотите закрыть приложение?"):

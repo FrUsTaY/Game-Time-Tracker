@@ -1,8 +1,8 @@
 import os
-import sys
-import tempfile
 import shutil
 import sqlite3
+import sys
+import tempfile
 import unittest
 from datetime import date, datetime, timedelta
 
@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from database import Database
+
 
 class TestDatabase(unittest.TestCase):
     """Тесты для класса Database"""

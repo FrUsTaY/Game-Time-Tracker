@@ -3,7 +3,11 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('assets', 'assets'), ('ui', 'ui')]
 binaries = []
-hiddenimports = ['win32gui', 'win32process', 'win32ui', 'win32con', 'psutil', 'pystray', 'matplotlib', 'customtkinter', 'PIL']
+hiddenimports = [
+    'win32gui', 'win32process', 'win32ui', 'win32con', 'win32api', 'win32event', 'winerror',
+    'psutil', 'pystray', 'matplotlib', 'customtkinter', 'PIL', 'plyer',
+    'plyer.platforms.win.notification', 'matplotlib.backends.backend_tkagg', 'logging_setup',
+]
 tmp_ret = collect_all('customtkinter')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 

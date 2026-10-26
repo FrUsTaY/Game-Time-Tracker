@@ -3,9 +3,11 @@ tab_archive.py — вкладка «Архив» для GameTimeTracker.
 """
 
 import os
+
 import customtkinter as ctk
-from ui.widgets import ArchiveCard, SectionTitle
+
 from database import Database
+from ui.widgets import ArchiveCard, SectionTitle
 from utils import get_base_dir
 
 

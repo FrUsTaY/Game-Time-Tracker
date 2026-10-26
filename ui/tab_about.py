@@ -2,14 +2,15 @@
 tab_about.py — вкладка «О программе» для GameTimeTracker.
 """
 
-import customtkinter as ctk
-from PIL import Image, ImageTk
 import os
 import tkinter.messagebox as messagebox
-from utils import get_base_dir, resource_path
 
+import customtkinter as ctk
+from PIL import Image
 
-APP_VERSION = "v1.2.2"
+from utils import resource_path
+
+APP_VERSION = "v1.3.0"
 
 
 class TabAbout(ctk.CTkFrame):

@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 
+
 def clean_build():
     """Удаляет старые папки сборки."""
     dirs_to_remove = ['build', 'dist', '__pycache__']
@@ -16,8 +17,33 @@ def clean_build():
             shutil.rmtree(dir_name)
             print(f"Удалена папка {dir_name}")
 
+def run_pyinstaller_from_spec():
+    """
+    Собирает .exe по GameTimeTracker.spec — единому источнику настроек сборки.
+
+    Раньше параметры дублировались в build.py и в .spec, из-за чего они
+    расходились (например, забытые hidden-import после добавления модулей).
+    """
+    spec_path = "GameTimeTracker.spec"
+    if not os.path.exists(spec_path):
+        print("Файл GameTimeTracker.spec не найден, используется резервная сборка")
+        return run_pyinstaller()
+
+    print("Запуск PyInstaller по спецификации GameTimeTracker.spec...")
+    result = subprocess.run(
+        ["pyinstaller", "--noconfirm", "--clean", spec_path],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print("Ошибка сборки:")
+        print(result.stderr)
+        sys.exit(1)
+    print("Сборка завершена успешно!")
+    print(f"Исполняемый файл: {os.path.abspath('dist/GameTimeTracker.exe')}")
+
+
 def run_pyinstaller():
-    """Запускает PyInstaller с нужными параметрами."""
+    """Резервная сборка: PyInstaller с явными параметрами командной строки."""
     # Проверяем наличие иконок
     if not os.path.exists("assets/app.ico"):
         print("Иконка assets/app.ico не найдена. Запустите generate_icon.py")
@@ -85,6 +111,6 @@ if __name__ == "__main__":
         sys.exit(1)
     else:
         print("Используются существующие иконки из папки assets")
-    run_pyinstaller()
+    run_pyinstaller_from_spec()
     create_launcher_bat()
     print("\nГотово! Файл GameTimeTracker.exe находится в папке dist.")

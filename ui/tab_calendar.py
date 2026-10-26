@@ -3,9 +3,11 @@ tab_calendar.py — вкладка «Календарь» для GameTimeTracker
 Календарь сверху, детали выбранного дня отображаются внизу во всю ширину.
 """
 
-import customtkinter as ctk
-from datetime import datetime, date, timedelta
 import calendar
+from datetime import date, timedelta
+
+import customtkinter as ctk
+
 from database import Database
 
 # Русские названия месяцев и дней недели
@@ -160,21 +162,17 @@ class TabCalendar(ctk.CTkFrame):
         else:
             end_date = date(self.current_year, self.current_month + 1, 1) - timedelta(days=1)
 
-        sessions = self.db.get_sessions_range(start_date, end_date)
+        # Разбивка по дням с корректным делением сессий, пересекающих полночь
+        breakdowns = self.db.get_day_breakdowns(start_date, end_date)
 
         self.sessions_cache.clear()
         month_total_seconds = 0
-        for sess in sessions:
-            sess_date_str = sess['started_at'][:10]
-            sess_date = datetime.fromisoformat(sess_date_str).date()
-            duration = sess.get('duration_seconds') or 0
-            if duration <= 0:
+        for day, games_map in breakdowns.items():
+            day_total = sum(games_map.values())
+            if day_total <= 0:
                 continue
-            if sess_date not in self.sessions_cache:
-                self.sessions_cache[sess_date] = {}
-            game_name = sess['display_name']
-            self.sessions_cache[sess_date][game_name] = self.sessions_cache[sess_date].get(game_name, 0) + duration
-            month_total_seconds += duration
+            self.sessions_cache[day] = dict(games_map)
+            month_total_seconds += day_total
 
         total_hours = month_total_seconds / 3600
         total_str = f"Итого за месяц: {int(total_hours)} ч {int((total_hours % 1) * 60)} мин"

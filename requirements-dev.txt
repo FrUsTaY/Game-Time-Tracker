@@ -1,0 +1,6 @@
+# Зависимости для разработки и CI
+-r requirements.txt
+pytest>=7.4
+pytest-cov>=4.1
+ruff>=0.4
+pyinstaller>=6.0.0  # нужен только для сборки .exe (python build.py)

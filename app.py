@@ -1,12 +1,18 @@
+import logging
 import os
 import sys
 
 from database import Database
 from settings import AppSettings
 from tracker import GameTracker
-from ui.main_window import MainWindow
 from tray import SystemTray
-from utils import get_base_dir, resource_path
+from ui.main_window import MainWindow
+from utils import format_duration, get_base_dir, resource_path
+
+logger = logging.getLogger(__name__)
+
+# Как часто обновлять подсказку иконки в трее (мс)
+TRAY_TOOLTIP_INTERVAL_MS = 60_000
 
 
 get_app_dir = get_base_dir
@@ -25,14 +31,30 @@ class App:
         self.on_tick_callback = None
         self._is_exiting = False
         self._background_notified = False
+        self._tooltip_job = None
+
+        # Автоматическая резервная копия при запуске (защита от потери данных)
+        self._create_startup_backup()
 
         self._init_ui()
         self._init_tracker()
         self._init_tray()
         self.window.protocol("WM_DELETE_WINDOW", self.on_window_close)
 
+    def _create_startup_backup(self) -> None:
+        """Создаёт ротационную резервную копию БД при запуске приложения."""
+        try:
+            if not self.settings.backup_on_startup:
+                return
+            backup_path = self.db.create_rotating_backup(keep=self.settings.backup_keep)
+            if backup_path:
+                logger.info("Резервная копия при запуске: %s", backup_path)
+        except Exception as e:
+            logger.warning("Не удалось создать резервную копию при запуске: %s", e)
+
     def _init_ui(self):
         self.window = MainWindow(self.db, None, self.settings, on_exit=self.exit_app)
+        self._refresh_tray_tooltip()
 
     def _init_tracker(self):
         def _safe_on_game_detected(exe_name, exe_path):
@@ -80,6 +102,34 @@ class App:
                 "GameTimeTracker",
                 "Приложение запущено и работает в фоновом режиме"
             )
+
+    def _refresh_tray_tooltip(self) -> None:
+        """Периодически обновляет подсказку трея со временем за сегодня."""
+        if getattr(self, '_is_exiting', False):
+            return
+        try:
+            tracker = getattr(self, 'tracker', None)
+            db = getattr(self, 'db', None)
+            tray = getattr(self, 'tray', None)
+            if tracker is not None:
+                seconds = tracker.get_live_today_seconds()
+            elif db is not None:
+                seconds = db.get_today_seconds()
+            else:
+                seconds = 0
+            if tray is not None:
+                tray.set_tooltip(f"GameTimeTracker — сегодня {format_duration(seconds)}")
+        except Exception as e:
+            logger.debug("Ошибка обновления подсказки трея: %s", e)
+
+        window = getattr(self, 'window', None)
+        if window is not None and not getattr(self, '_is_exiting', False):
+            try:
+                self._tooltip_job = window.after(
+                    TRAY_TOOLTIP_INTERVAL_MS, self._refresh_tray_tooltip
+                )
+            except Exception:
+                pass
 
     def show_notification(self, title: str, message: str):
         if self.tray:
@@ -130,6 +180,15 @@ class App:
         if self._is_exiting:
             return
         self._is_exiting = True
+
+        # 0. Останавливаем отложенные задачи Tkinter
+        tooltip_job = getattr(self, '_tooltip_job', None)
+        if tooltip_job is not None and getattr(self, 'window', None):
+            try:
+                self.window.after_cancel(tooltip_job)
+            except Exception:
+                pass
+            self._tooltip_job = None
 
         # 1. Остановка трекера (сохраняет накопленные данные сессий в БД)
         if self.tracker:

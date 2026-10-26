@@ -5,6 +5,7 @@ from datetime import date, timedelta
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import customtkinter as ctk
+
 from database import Database
 from ui.tab_stats import TabStats
 

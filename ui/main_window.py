@@ -1,16 +1,16 @@
-import customtkinter as ctk
-from PIL import Image, ImageTk
 import os
-import sys
 import traceback
 
-from ui.tab_games import TabGames
-from ui.tab_calendar import TabCalendar
-from ui.tab_archive import TabArchive
-from ui.tab_stats import TabStats
-from ui.tab_about import TabAbout
+import customtkinter as ctk
+from PIL import Image, ImageTk
+
 from ui.settings_window import SettingsWindow
-from utils import get_base_dir, resource_path
+from ui.tab_about import TabAbout
+from ui.tab_archive import TabArchive
+from ui.tab_calendar import TabCalendar
+from ui.tab_games import TabGames
+from ui.tab_stats import TabStats
+from utils import resource_path
 
 
 class NotificationsDialog(ctk.CTkToplevel):

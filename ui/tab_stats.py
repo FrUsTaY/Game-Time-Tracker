@@ -2,15 +2,18 @@
 tab_stats.py — вкладка «Статистика» для GameTimeTracker.
 """
 
+from datetime import date, timedelta
+
 import customtkinter as ctk
-from datetime import datetime, date, timedelta
 import matplotlib
+
 matplotlib.use("TkAgg")
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 from database import Database
+from utils import format_duration
 
 
 class TabStats(ctk.CTkFrame):
@@ -71,6 +74,21 @@ class TabStats(ctk.CTkFrame):
         )
         self.archive_switch.pack(side="right", padx=10)
 
+        self.export_report_btn = ctk.CTkButton(
+            self.top_ctrl_frame,
+            text="📄 Отчёт в HTML",
+            command=self.export_html_report,
+            fg_color="transparent",
+            border_color="#7b2fff",
+            border_width=1,
+            text_color="#7b2fff",
+            hover_color="#1a1a2e",
+            width=140,
+            height=28,
+            font=("Segoe UI", 12)
+        )
+        self.export_report_btn.pack(side="right", padx=5)
+
         # Сводные карточки
         self.cards_frame = ctk.CTkFrame(self.main_canvas, fg_color="transparent")
         self.cards_frame.grid(row=1, column=0, sticky="ew", pady=10)
@@ -81,6 +99,12 @@ class TabStats(ctk.CTkFrame):
         self.card_longest_session = self._create_stat_card(self.cards_frame, "Самая долгая сессия", "—", 1)
         self.card_best_day = self._create_stat_card(self.cards_frame, "Самый активный день", "—", 2)
         self.card_counts = self._create_stat_card(self.cards_frame, "Игр в библиотеке", "0", 3)
+
+        # Второй ряд карточек: краткосрочная динамика
+        self.card_today = self._create_stat_card(self.cards_frame, "Сегодня", "0 сек", 0, row=1)
+        self.card_week = self._create_stat_card(self.cards_frame, "За 7 дней", "0 сек", 1, row=1)
+        self.card_streak = self._create_stat_card(self.cards_frame, "Серия дней", "0", 2, row=1)
+        self.card_avg_day = self._create_stat_card(self.cards_frame, "В среднем в день", "0 сек", 3, row=1)
 
         # Топ игр
         self.top_label = ctk.CTkLabel(
@@ -127,9 +151,9 @@ class TabStats(ctk.CTkFrame):
         self.avg_table = ctk.CTkScrollableFrame(self.avg_frame, fg_color="transparent")
         self.avg_table.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-    def _create_stat_card(self, parent, title: str, value: str, col: int):
+    def _create_stat_card(self, parent, title: str, value: str, col: int, row: int = 0):
         card = ctk.CTkFrame(parent, fg_color="#1a1a2e", corner_radius=12, border_width=1, border_color="#00d4ff")
-        card.grid(row=0, column=col, padx=10, pady=10, sticky="ew")
+        card.grid(row=row, column=col, padx=10, pady=10, sticky="ew")
         card.grid_columnconfigure(0, weight=1)
 
         title_label = ctk.CTkLabel(card, text=title, font=("Segoe UI", 12), text_color="#888888")
@@ -196,6 +220,26 @@ class TabStats(ctk.CTkFrame):
         else:
             self.card_best_day.value_label.configure(text="Нет данных")
 
+        # Краткосрочная динамика: сегодня / неделя / серия / среднее
+        try:
+            summary = self.db.get_activity_summary(days=30, include_archived=include_archived)
+        except Exception:
+            summary = {'today': 0, 'week': 0, 'streak': 0, 'avg_daily': 0}
+
+        today_text = format_duration(summary['today'])
+        limit_enabled = bool(getattr(self.settings, 'daily_limit_enabled', False)) if self.settings else False
+        if limit_enabled:
+            limit_seconds = getattr(self.settings, 'daily_limit_minutes', 0) * 60
+            if limit_seconds:
+                today_text += f"\nиз {format_duration(limit_seconds)}"
+        self.card_today.value_label.configure(text=today_text)
+        self.card_week.value_label.configure(text=format_duration(summary['week']))
+        streak = summary['streak']
+        self.card_streak.value_label.configure(
+            text=f"{streak} дн.\nподряд" if streak else "нет серии"
+        )
+        self.card_avg_day.value_label.configure(text=format_duration(summary['avg_daily']))
+
     def _update_top_games(self, top_n: int = 5, include_archived: bool = None):
         if include_archived is None:
             include_archived = self.include_archive_var.get() if hasattr(self, 'include_archive_var') else False
@@ -247,14 +291,8 @@ class TabStats(ctk.CTkFrame):
         days = int(self.period_var.get())
         end_date = date.today()
         start_date = end_date - timedelta(days=days-1)
-        sessions = self.db.get_sessions_range(start_date, end_date, include_archived=include_archived)
-
-        daily_seconds = {}
-        for sess in sessions:
-            sess_date = datetime.fromisoformat(sess['started_at']).date()
-            duration = sess.get('duration_seconds') or 0
-            if duration > 0:
-                daily_seconds[sess_date] = daily_seconds.get(sess_date, 0) + duration
+        # Длительности сессий, пересекающих полночь, корректно делятся по дням
+        daily_seconds = self.db.get_daily_totals(start_date, end_date, include_archived)
 
         current = start_date
         dates = []
@@ -336,6 +374,33 @@ class TabStats(ctk.CTkFrame):
             ctk.CTkLabel(row_frame, text=game_name, width=200, anchor="w", font=("Segoe UI", 11)).pack(side="left", padx=5)
             ctk.CTkLabel(row_frame, text=str(count), width=80, anchor="center", font=("Segoe UI", 11)).pack(side="left")
             ctk.CTkLabel(row_frame, text=avg_str, width=120, anchor="center", font=("Consolas", 11), text_color="#00d4ff").pack(side="left")
+
+    def export_html_report(self):
+        """Экспортирует HTML-отчёт за выбранный период (7/30/90 дней)."""
+        from tkinter import filedialog, messagebox
+
+        try:
+            days = int(self.period_var.get())
+        except (TypeError, ValueError):
+            days = 30
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days - 1)
+        include_archived = self.include_archive_var.get() if hasattr(self, 'include_archive_var') else False
+
+        filepath = filedialog.asksaveasfilename(
+            title="Сохранить HTML-отчёт",
+            defaultextension=".html",
+            initialfile=f"gametimetracker_report_{start_date:%Y%m%d}_{end_date:%Y%m%d}.html",
+            filetypes=[("HTML-файлы", "*.html"), ("Все файлы", "*.*")]
+        )
+        if not filepath:
+            return
+
+        success = self.db.export_report_html(filepath, start_date, end_date, include_archived)
+        if success:
+            messagebox.showinfo("Отчёт сохранён", f"Отчёт за {days} дн. сохранён:\n{filepath}")
+        else:
+            messagebox.showerror("Ошибка", "Не удалось сформировать отчёт")
 
     def destroy(self):
         """Очищает ресурсы графиков Matplotlib при уничтожении вкладки."""
