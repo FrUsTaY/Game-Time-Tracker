@@ -201,6 +201,32 @@ class TestWeeklyDigest(unittest.TestCase):
         self.assertIn("активности не было", message)
 
 
+class TestIntegrityCheck(unittest.TestCase):
+    def test_fresh_database_is_ok(self):
+        db = Database(":memory:")
+        try:
+            self.assertTrue(db.check_integrity())
+            self.assertTrue(db.check_integrity(quick=False))
+        finally:
+            db.close()
+
+    def test_database_errors_are_reported_as_corruption(self):
+        import sqlite3
+
+        class BrokenConnection:
+            def execute(self, *_args, **_kwargs):
+                raise sqlite3.DatabaseError("database disk image is malformed")
+
+        db = Database(":memory:")
+        real_conn = db.conn
+        try:
+            db.conn = BrokenConnection()
+            self.assertFalse(db.check_integrity())
+        finally:
+            db.conn = real_conn
+            db.close()
+
+
 class TestJsonExportImport(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()

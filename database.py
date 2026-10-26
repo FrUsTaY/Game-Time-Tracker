@@ -1263,6 +1263,26 @@ class Database:
                 backup_conn.close()
 
 
+    def check_integrity(self, quick: bool = True) -> bool:
+        """
+        Проверяет целостность базы данных (PRAGMA quick_check / integrity_check).
+
+        Выполняется при запуске приложения, чтобы вовремя заметить повреждение
+        файла БД (например, после отключения электричества) и подсказать
+        пользователю про резервные копии.
+
+        Returns:
+            True, если SQLite сообщает «ok».
+        """
+        pragma = "quick_check" if quick else "integrity_check"
+        with self.lock:
+            try:
+                row = self.conn.execute(f"PRAGMA {pragma}").fetchone()
+            except sqlite3.DatabaseError as e:
+                logger.error("Проверка целостности БД не удалась: %s", e)
+                return False
+        return bool(row) and str(row[0]).strip().lower() == "ok"
+
     def create_rotating_backup(self, backup_dir: Optional[str] = None,
                                keep: int = 7) -> Optional[str]:
         """

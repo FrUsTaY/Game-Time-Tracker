@@ -40,13 +40,29 @@ class App:
         self._tooltip_job = None
         self._weekly_digest_job = None
 
-        # Автоматическая резервная копия при запуске (защита от потери данных)
+        # Проверка целостности БД и автоматическая резервная копия при запуске
+        self._check_database_integrity()
         self._create_startup_backup()
 
         self._init_ui()
         self._init_tracker()
         self._init_tray()
         self.window.protocol("WM_DELETE_WINDOW", self.on_window_close)
+
+    def _check_database_integrity(self) -> None:
+        """Предупреждает пользователя, если файл базы данных повреждён."""
+        try:
+            if self.db.check_integrity():
+                return
+            logger.error("База данных повреждена: %s", self.db.db_path)
+            if self.tray is not None:
+                self.tray.show_notification(
+                    "GameTimeTracker",
+                    "⚠ Обнаружено повреждение базы данных. Используйте последнюю "
+                    "резервную копию из папки data/backups."
+                )
+        except Exception as e:
+            logger.warning("Не удалось проверить целостность БД: %s", e)
 
     def _maybe_send_weekly_digest(self) -> None:
         """
