@@ -47,7 +47,22 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Сборка по спецификации
-        run: python build.py
+        shell: pwsh
+        run: |
+          # Собираем напрямую через PyInstaller (без build.py), чтобы видеть лог:
+          # build.py глушит вывод, а логи Actions не всегда доступны.
+          python -m PyInstaller --noconfirm --clean GameTimeTracker.spec *> build.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Get-Content build.log -Tail 40 | ForEach-Object {
+              Write-Host $_
+              $line = $_ -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A'
+              Write-Output "::error::$line"
+            }
+            if (Test-Path dist) { Get-ChildItem dist | Format-Table | Out-String | Write-Host }
+            exit $code
+          }
+          Get-Content build.log -Tail 15 | Write-Host
 
       - name: Проверка артефакта
         shell: pwsh
