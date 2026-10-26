@@ -62,6 +62,7 @@ jobs:
           tests/test_database.py
           tests/test_settings.py
           tests/test_new_features.py
+          tests/test_backlog_features.py
           tests/test_utils_and_paths.py
 
   lint:

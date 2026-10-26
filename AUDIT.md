@@ -166,7 +166,7 @@ UI-поток и поток трекера работают с одним сое
 python -m pytest tests/test_database.py tests/test_settings.py \
                  tests/test_new_features.py tests/test_backlog_features.py \
                  tests/test_utils_and_paths.py -q
-# → 139 passed
+# → 145 passed
 
 # Полный набор (Windows, требует customtkinter/matplotlib/pywin32)
 python -m pytest -q
