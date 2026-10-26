@@ -5,7 +5,6 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import customtkinter as ctk
 
 from database import Database
 from settings import AppSettings
@@ -151,14 +150,6 @@ class TestAudit2Task4DriftAndIdleTasks(unittest.TestCase):
         # Симулируем 10 шагов с неравномерным временем выполнения процесса (например, 1.07 секунды на шаг)
         current_time = t0
         with patch.object(self.tracker, '_is_game_active', return_value=True):
-            # Мокаем БД и отслеживаемые процессы
-            tracked_games = {
-                game_id: {
-                    'game_info': {'id': game_id, 'exe_name': 'test_game.exe'},
-                    'pid': 1234,
-                    'pids': [1234]
-                }
-            }
             with patch.object(self.tracker, '_get_active_window_pid', return_value=1234), \
                  patch.object(self.tracker.db, 'get_all_games', return_value=[{'id': game_id, 'exe_name': 'test_game.exe'}]), \
                  patch('psutil.process_iter', return_value=[]):

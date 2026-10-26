@@ -5,7 +5,6 @@ tests/test_stage2_ux.py — тесты для UX-улучшений Этапа 2
 import os
 import tempfile
 import unittest
-from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
 import customtkinter as ctk

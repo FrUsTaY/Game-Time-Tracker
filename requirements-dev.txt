@@ -2,5 +2,6 @@
 -r requirements.txt
 pytest>=7.4
 pytest-cov>=4.1
+pytest-github-actions-annotate-failures>=0.2  # аннотации упавших тестов в PR
 ruff>=0.4
 pyinstaller>=6.0.0  # нужен только для сборки .exe (python build.py)

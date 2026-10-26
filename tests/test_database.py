@@ -4,7 +4,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 # Добавляем родительскую директорию в sys.path для импорта database
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -658,9 +658,9 @@ class TestDatabaseGetAllGames(unittest.TestCase):
 
     def test_get_all_games_active_and_archived(self):
         """Тест получения активных и архивных игр"""
-        game1_id = self.db.add_game("game1.exe", "Game 1")
+        self.db.add_game("game1.exe", "Game 1")
         game2_id = self.db.add_game("game2.exe", "Game 2")
-        game3_id = self.db.add_game("game3.exe", "Game 3")
+        self.db.add_game("game3.exe", "Game 3")
 
         self.db.archive_game(game2_id)
 

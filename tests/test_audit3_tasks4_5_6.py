@@ -122,7 +122,7 @@ class TestAudit3Task5GamesUX(unittest.TestCase):
         """При ручном вводе имени без .exe автоматически добавляется .exe"""
         with patch('customtkinter.CTkToplevel') as mock_toplevel, \
              patch('tkinter.messagebox.showinfo'), \
-             patch.object(self.tab, '_add_game_by_name') as mock_add_by_name:
+             patch.object(self.tab, '_add_game_by_name') as _mock_add_by_name:
 
             # Эмулируем вызов add_game_manual и подтверждение диалога
             mock_dlg = MagicMock()

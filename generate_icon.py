@@ -15,10 +15,10 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 def generate_icon_png(size: int = 256) -> Image.Image:
     """
     Генерирует квадратную иконку с неоновым таймером.
-    
+
     Args:
         size: размер иконки в пикселях (ширина = высота)
-    
+
     Returns:
         PIL Image объект с иконкой
     """
@@ -99,7 +99,6 @@ def generate_icon_png(size: int = 256) -> Image.Image:
     text = "GT"
     bbox = draw.textbbox((0, 0), text, font=font)
     text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
     text_x = cx - text_width // 2
     text_y = cy + int(inner_radius * 0.6)
     draw.text((text_x, text_y), text, fill=neon_cyan, font=font)

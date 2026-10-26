@@ -14,7 +14,7 @@ from app import App
 from database import Database
 from settings import AppSettings
 from tracker import GameTracker
-from ui.tab_calendar import MONTHS_GENITIVE_RU, TabCalendar
+from ui.tab_calendar import TabCalendar
 from ui.tab_games import TabGames
 
 

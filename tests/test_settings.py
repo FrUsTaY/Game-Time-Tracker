@@ -3,11 +3,10 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 try:
-    import winreg
+    import winreg  # noqa: F401  (нужен, чтобы подставить заглушку в sys.modules)
 except ImportError:
     sys.modules['winreg'] = MagicMock()
 
-import settings
 from settings import AppSettings
 
 
@@ -101,7 +100,7 @@ class TestAppSettings(unittest.TestCase):
         self.app_settings.enable_autostart()
 
         mock_winreg.OpenKey.assert_called_once()
-        expected_path = f'"C:\\python\\python.exe" "C:\\path\\to\\main.py"'
+        expected_path = '"C:\\python\\python.exe" "C:\\path\\to\\main.py"'
         mock_winreg.SetValueEx.assert_called_once_with(
             mock_key, "GameTimeTracker", 0, mock_winreg.REG_SZ, expected_path
         )
