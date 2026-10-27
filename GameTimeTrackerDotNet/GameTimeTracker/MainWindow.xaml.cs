@@ -26,9 +26,6 @@ namespace GameTimeTracker
                 _db = new DatabaseContext();
                 _settings = new SettingsManager(_db);
                 _tracker = new TrackerService(_db, _settings);
-                
-                // Set custom icon for tray (for now use a system icon, in real app set IconSource)
-                TrayIcon.Icon = System.Drawing.SystemIcons.Application;
 
                 // Clean zombie sessions on startup
                 _db.CleanupZombieSessions();
