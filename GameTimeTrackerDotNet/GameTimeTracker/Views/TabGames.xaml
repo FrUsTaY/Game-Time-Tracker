@@ -1,0 +1,63 @@
+<Page x:Class="GameTimeTracker.Views.TabGames"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="TabGames" Foreground="#e0e0e0">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Top bar (Search & Add Game) -->
+        <Grid Grid.Row="0" Margin="0,0,0,15">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            
+            <TextBox x:Name="SearchBox" Grid.Column="0" 
+                     Background="#1a1a2e" Foreground="#e0e0e0" 
+                     BorderBrush="#2a2a4e" BorderThickness="1" 
+                     Padding="10,5" FontSize="14" 
+                     Tag="Поиск игр..."/>
+
+            <Button Grid.Column="1" Content="+ Добавить игру" 
+                    Background="#7b2fff" Foreground="White" 
+                    BorderThickness="0" Padding="15,5" Margin="10,0,0,0" 
+                    Cursor="Hand" FontWeight="Bold"/>
+        </Grid>
+
+        <!-- Games List (ScrollViewer + ItemsControl) -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="GamesList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="#1a1a2e" BorderBrush="#2a2a4e" BorderThickness="1" 
+                                CornerRadius="8" Margin="0,0,0,10" Padding="15">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="60"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="150"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <!-- Placeholder Icon -->
+                                <Rectangle Grid.Column="0" Width="48" Height="48" Fill="#2a2a4e" RadiusX="8" RadiusY="8"/>
+                                
+                                <StackPanel Grid.Column="1" Margin="15,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding DisplayName}" FontSize="16" FontWeight="SemiBold" Foreground="#00d4ff"/>
+                                    <TextBlock Text="{Binding ExeName}" FontSize="12" Foreground="#888888" Margin="0,5,0,0"/>
+                                </StackPanel>
+                                
+                                <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                    <TextBlock Text="{Binding TotalSecondsFormated}" FontSize="18" FontWeight="Bold" Foreground="#e0e0e0" TextAlignment="Right"/>
+                                    <TextBlock Text="Запусков: {Binding LaunchCount}" FontSize="12" Foreground="#888888" TextAlignment="Right" Margin="0,5,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </Grid>
+</Page>
