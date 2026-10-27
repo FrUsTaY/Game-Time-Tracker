@@ -105,9 +105,14 @@ namespace GameTimeTracker.Services
                 using RegistryKey? key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
                 if (key != null)
                 {
-                    string appPath = $"\"{System.Reflection.Assembly.GetExecutingAssembly().Location}\"";
-                    key.SetValue("GameTimeTracker", appPath);
-                    SetBool("autostart", true);
+                    // For single-file apps, Location is empty. We use Process.GetCurrentProcess().MainModule.FileName
+                    string? processPath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                    if (!string.IsNullOrEmpty(processPath))
+                    {
+                        string appPath = $"\"{processPath}\"";
+                        key.SetValue("GameTimeTracker", appPath);
+                        SetBool("autostart", true);
+                    }
                 }
             }
             catch (Exception ex)
