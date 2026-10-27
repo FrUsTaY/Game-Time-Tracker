@@ -61,11 +61,12 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="MenuItem">
                         <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderThickness="0" Padding="{TemplateBinding Padding}" CornerRadius="4">
-                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                            <TextBlock Text="{TemplateBinding Header}" Foreground="{TemplateBinding Foreground}"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsHighlighted" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="#2a2a4e"/>
+                                <Setter Property="Foreground" Value="#00d4ff"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
