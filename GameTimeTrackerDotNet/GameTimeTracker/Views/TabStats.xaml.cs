@@ -23,22 +23,39 @@ namespace GameTimeTracker.Views
         {
             var games = _db.GetAllGames(archived: false).ToList();
             
-            // Dummy logic representing DB stats calculation for UI 
-            long totalSeconds = games.Sum(g => g.TotalSeconds);
+            long totalSeconds = games.Sum(g => (long)g.TotalSeconds);
             int activeGames = games.Count(g => g.TotalSeconds > 0);
 
             TxtTotalTime.Text = FormatDuration(totalSeconds);
             TxtTotalGames.Text = activeGames.ToString();
 
-            // Set up chart
-            var dummyData = new double[] { 1.2, 0.5, 3.4, 2.1, 0, 4.5, 2.0 };
+            // Set up chart with REAL data from SQLite for the last 7 days
+            var values = new double[7];
+            var labels = new string[7];
+            
+            for (int i = 6; i >= 0; i--)
+            {
+                var date = DateTime.Today.AddDays(-i);
+                labels[6 - i] = date.ToString("dd.MM");
+                
+                var breakdown = _db.GetDayBreakdown(date, includeArchived: true);
+                long totalSecsForDay = 0;
+                
+                foreach(var row in breakdown) 
+                {
+                    totalSecsForDay += Convert.ToInt64(row.TotalSeconds);
+                }
+                
+                values[6 - i] = Math.Round(totalSecsForDay / 3600.0, 1); // convert to hours
+            }
             
             ActivityChart.Series = new ISeries[]
             {
                 new ColumnSeries<double>
                 {
-                    Values = dummyData,
-                    Fill = new LiveChartsCore.SkiaSharpView.Painting.SolidColorPaint(SkiaSharp.SKColors.Cyan)
+                    Values = values,
+                    Fill = new LiveChartsCore.SkiaSharpView.Painting.SolidColorPaint(SkiaSharp.SKColors.Cyan),
+                    Name = "Часы"
                 }
             };
             
@@ -46,7 +63,7 @@ namespace GameTimeTracker.Views
             {
                 new Axis
                 {
-                    Labels = new[] { "Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс" }
+                    Labels = labels
                 }
             };
         }

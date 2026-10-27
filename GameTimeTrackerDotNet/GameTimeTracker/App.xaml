@@ -3,6 +3,44 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         <!-- Base theme colors will go here -->
+        <!-- Fix selection colors for dark theme -->
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#7b2fff" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#ffffff" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#2a2a4e" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="#e0e0e0" />
+
+        <!-- Global TextBox Style -->
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#1a1a2e"/>
+            <Setter Property="Foreground" Value="#e0e0e0"/>
+            <Setter Property="CaretBrush" Value="#00d4ff"/>
+            <Setter Property="BorderBrush" Value="#2a2a4e"/>
+            <Setter Property="SelectionBrush" Value="#7b2fff"/>
+            <Setter Property="Padding" Value="5"/>
+        </Style>
+
+        <!-- Global ListBoxItem Style to avoid standard blue hover/select -->
+        <Style TargetType="ListBoxItem">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border Background="{TemplateBinding Background}">
+                            <ContentPresenter/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#2a2a4e"/>
+                </Trigger>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#1a1a2e"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Application.Resources>
 </Application>

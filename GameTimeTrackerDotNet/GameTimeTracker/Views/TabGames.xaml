@@ -19,21 +19,30 @@
                      Background="#1a1a2e" Foreground="#e0e0e0" 
                      BorderBrush="#2a2a4e" BorderThickness="1" 
                      Padding="10,5" FontSize="14" 
-                     Tag="Поиск игр..."/>
+                     Text="Поиск игр..."
+                     GotFocus="SearchBox_GotFocus"
+                     LostFocus="SearchBox_LostFocus"
+                     TextChanged="SearchBox_TextChanged"/>
 
             <Button Grid.Column="1" Content="+ Добавить игру" 
                     Background="#7b2fff" Foreground="White" 
                     BorderThickness="0" Padding="15,5" Margin="10,0,0,0" 
-                    Cursor="Hand" FontWeight="Bold"/>
+                    Cursor="Hand" FontWeight="Bold" Click="BtnAddGame_Click"/>
         </Grid>
 
-        <!-- Games List (ScrollViewer + ItemsControl) -->
+        <!-- Games List (ScrollViewer + ListBox) -->
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <ItemsControl x:Name="GamesList">
-                <ItemsControl.ItemTemplate>
+            <ListBox x:Name="GamesList" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                <ListBox.ItemTemplate>
                     <DataTemplate>
                         <Border Background="#1a1a2e" BorderBrush="#2a2a4e" BorderThickness="1" 
                                 CornerRadius="8" Margin="0,0,0,10" Padding="15">
+                            <Border.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="В архив" Click="MenuArchive_Click" CommandParameter="{Binding}"/>
+                                    <MenuItem Header="Удалить" Click="MenuDelete_Click" CommandParameter="{Binding}"/>
+                                </ContextMenu>
+                            </Border.ContextMenu>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="60"/>
@@ -57,7 +66,7 @@
                         </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            </ListBox>
         </ScrollViewer>
     </Grid>
 </Page>
