@@ -22,13 +22,13 @@ namespace GameTimeTracker.Views
             var games = _db.GetAllGames(archived: false).Select(g => new GameViewModel
             {
                 Id = g.Id,
-                DisplayName = g.DisplayName,
-                ExeName = g.ExeName,
+                DisplayName = g.DisplayName ?? "Unknown",
+                ExeName = g.ExeName ?? "unknown.exe",
                 LaunchCount = g.LaunchCount,
                 TotalSecondsFormated = FormatDuration(g.TotalSeconds)
             });
 
-            if (!string.IsNullOrWhiteSpace(searchQuery) && searchQuery != "поиск игр...")
+            if (!string.IsNullOrWhiteSpace(searchQuery) && !searchQuery.Equals("поиск игр...", StringComparison.OrdinalIgnoreCase))
             {
                 searchQuery = searchQuery.ToLower();
                 games = games.Where(g => g.DisplayName.ToLower().Contains(searchQuery) || g.ExeName.ToLower().Contains(searchQuery));

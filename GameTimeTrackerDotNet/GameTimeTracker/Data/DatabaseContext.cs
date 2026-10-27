@@ -14,6 +14,11 @@ namespace GameTimeTracker.Data
         private readonly SqliteConnection _connection;
         private static readonly int SCHEMA_VERSION = 3;
 
+        static DatabaseContext()
+        {
+            DefaultTypeMap.MatchNamesWithUnderscores = true;
+        }
+
         public DatabaseContext(string? dbPath = null)
         {
             if (string.IsNullOrEmpty(dbPath) || dbPath == "data/gametracker.db")
