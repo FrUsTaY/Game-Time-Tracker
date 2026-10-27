@@ -60,7 +60,7 @@
                                 
                                 <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right">
                                     <TextBlock Text="{Binding TotalSecondsFormated}" FontSize="18" FontWeight="Bold" Foreground="#e0e0e0" TextAlignment="Right"/>
-                                    <TextBlock Text="Запусков: {Binding LaunchCount}" FontSize="12" Foreground="#888888" TextAlignment="Right" Margin="0,5,0,0"/>
+                                    <TextBlock Text="{Binding LaunchCount, StringFormat='Запусков: \{0\}'}" FontSize="12" Foreground="#888888" TextAlignment="Right" Margin="0,5,0,0"/>
                                 </StackPanel>
                             </Grid>
                         </Border>

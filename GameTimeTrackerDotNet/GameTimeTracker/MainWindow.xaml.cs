@@ -44,6 +44,7 @@ namespace GameTimeTracker
                 StatsFrame.Navigate(new Views.TabStats(_db));
                 CalendarFrame.Navigate(new Views.TabCalendar(_db));
                 ArchiveFrame.Navigate(new Views.TabArchive(_db));
+                AboutFrame.Navigate(new Views.TabAbout());
             }
             catch (Exception ex)
             {
