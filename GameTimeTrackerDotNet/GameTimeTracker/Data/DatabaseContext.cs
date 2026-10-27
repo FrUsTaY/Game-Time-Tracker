@@ -4,6 +4,7 @@ using System.Data;
 using System.IO;
 using Microsoft.Data.Sqlite;
 using Dapper;
+using GameTimeTracker.Models;
 
 namespace GameTimeTracker.Data
 {
