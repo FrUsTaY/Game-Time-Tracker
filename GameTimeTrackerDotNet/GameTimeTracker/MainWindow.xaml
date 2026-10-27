@@ -40,9 +40,9 @@
                         Visibility="Collapsed">
             <tb:TaskbarIcon.ContextMenu>
                 <ContextMenu Background="#1a1a2e" Foreground="#e0e0e0">
-                    <MenuItem Header="Открыть" Click="MenuItem_Open_Click" Foreground="Black"/>
+                    <MenuItem Header="Открыть" Click="MenuItem_Open_Click" Foreground="#e0e0e0"/>
                     <Separator/>
-                    <MenuItem Header="Выход" Click="MenuItem_Exit_Click" Foreground="Black"/>
+                    <MenuItem Header="Выход" Click="MenuItem_Exit_Click" Foreground="#e0e0e0"/>
                 </ContextMenu>
             </tb:TaskbarIcon.ContextMenu>
         </tb:TaskbarIcon>

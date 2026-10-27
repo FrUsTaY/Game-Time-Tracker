@@ -15,7 +15,8 @@
             <Setter Property="Foreground" Value="#e0e0e0"/>
             <Setter Property="CaretBrush" Value="#00d4ff"/>
             <Setter Property="BorderBrush" Value="#2a2a4e"/>
-            <Setter Property="SelectionBrush" Value="#7b2fff"/>
+            <Setter Property="SelectionBrush" Value="#00d4ff"/>
+            <Setter Property="SelectionTextBrush" Value="#1a1a2e"/>
             <Setter Property="Padding" Value="5"/>
         </Style>
 

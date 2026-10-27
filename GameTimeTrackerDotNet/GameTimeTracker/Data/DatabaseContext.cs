@@ -219,7 +219,7 @@ namespace GameTimeTracker.Data
                 INSERT INTO sessions (game_id, started_at) VALUES (@GameId, @StartedAt);
                 SELECT last_insert_rowid();
             ";
-            return _connection.ExecuteScalar<int>(sql, new { GameId = gameId, StartedAt = DateTime.Now.ToString("O") });
+            return Convert.ToInt32(_connection.ExecuteScalar(sql, new { GameId = gameId, StartedAt = DateTime.Now.ToString("O") }));
         }
 
         public void EndSession(int sessionId, int durationSeconds)
@@ -287,13 +287,13 @@ namespace GameTimeTracker.Data
                 SELECT last_insert_rowid();
             ";
 
-            return _connection.ExecuteScalar<int>(sql, new 
+            return Convert.ToInt32(_connection.ExecuteScalar(sql, new 
             {
                 ExeName = exeName.ToLower(),
                 DisplayName = displayName,
                 ExePath = exePath,
                 AddedAt = DateTime.Now.ToString("O") // ISO 8601
-            });
+            }));
         }
 
         // Add more methods here corresponding to database.py
