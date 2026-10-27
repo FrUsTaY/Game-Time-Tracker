@@ -278,7 +278,6 @@ namespace GameTimeTracker.Data
             _connection.Execute("DELETE FROM pending_notifications WHERE exe_name = @ExeName", new { ExeName = exeName.ToLower() });
         }
 
-        public void Dispose()
         public int AddGame(string exeName, string displayName, string? exePath)
         {
             var sql = @"
