@@ -1,0 +1,91 @@
+<Window x:Class="GameTimeTracker.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:tb="http://www.hardcodet.net/taskbar"
+        Title="GameTimeTracker" Height="650" Width="900"
+        Background="#0d0d0d" Foreground="#e0e0e0"
+        WindowStartupLocation="CenterScreen"
+        Icon="pack://application:,,,/Assets/app.ico"
+        StateChanged="Window_StateChanged"
+        Closing="Window_Closing">
+    
+    <Window.Resources>
+        <!-- Style for tabs -->
+        <Style TargetType="TabItem">
+            <Setter Property="Background" Value="#1a1a2e"/>
+            <Setter Property="Foreground" Value="#e0e0e0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="15,10"/>
+            <Setter Property="Margin" Value="0,0,5,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="4,4,0,0">
+                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2a2a4e"/>
+                                <Setter Property="Foreground" Value="#00d4ff"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2a2a4e"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Taskbar Icon -->
+        <tb:TaskbarIcon x:Name="TrayIcon"
+                        IconSource="pack://application:,,,/Assets/app.ico"
+                        ToolTipText="GameTimeTracker"
+                        TrayMouseDoubleClick="TrayIcon_TrayMouseDoubleClick"
+                        Visibility="Collapsed">
+            <tb:TaskbarIcon.ContextMenu>
+                <ContextMenu Background="#1a1a2e" Foreground="#e0e0e0">
+                    <MenuItem Header="Открыть" Click="MenuItem_Open_Click" Foreground="#e0e0e0"/>
+                    <Separator/>
+                    <MenuItem Header="Выход" Click="MenuItem_Exit_Click" Foreground="#e0e0e0"/>
+                </ContextMenu>
+            </tb:TaskbarIcon.ContextMenu>
+        </tb:TaskbarIcon>
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="0,0,0,15">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="🎮 GameTimeTracker" FontSize="22" FontWeight="Bold" Foreground="#00d4ff"/>
+            <Button Grid.Column="1" Content="Настройки ⚙" Background="#1a1a2e" Foreground="#e0e0e0" BorderThickness="0" Padding="15,5" Cursor="Hand" Click="Settings_Click"/>
+        </Grid>
+
+        <!-- Tab Control -->
+        <TabControl Grid.Row="1" Background="Transparent" BorderThickness="0">
+            <TabItem Header="Игры">
+                <Frame x:Name="GamesFrame" NavigationUIVisibility="Hidden"/>
+            </TabItem>
+            <TabItem Header="Статистика">
+                <Frame x:Name="StatsFrame" NavigationUIVisibility="Hidden"/>
+            </TabItem>
+            <TabItem Header="Календарь">
+                <Frame x:Name="CalendarFrame" NavigationUIVisibility="Hidden"/>
+            </TabItem>
+            <TabItem Header="Архив">
+                <Frame x:Name="ArchiveFrame" NavigationUIVisibility="Hidden"/>
+            </TabItem>
+            <TabItem Header="О программе">
+                <Frame x:Name="AboutFrame" NavigationUIVisibility="Hidden"/>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</Window>
