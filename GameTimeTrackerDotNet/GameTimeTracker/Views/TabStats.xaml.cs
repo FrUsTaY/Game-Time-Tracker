@@ -26,6 +26,23 @@ namespace GameTimeTracker.Views
             long totalSeconds = games.Sum(g => (long)g.TotalSeconds);
             int activeGames = games.Count(g => g.TotalSeconds > 0);
 
+            // Fetch longest session
+            var longestSql = "SELECT MAX(duration_seconds) FROM sessions";
+            var longestSecs = _db.GetSetting("longest_session") != null ? 0 : 0; // Using raw query
+            // Fast workaround for longest session
+            try {
+                using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={AppDomain.CurrentDomain.BaseDirectory}data/gametracker.db");
+                conn.Open();
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT duration_seconds, game_id FROM sessions ORDER BY duration_seconds DESC LIMIT 1";
+                using var reader = cmd.ExecuteReader();
+                if (reader.Read())
+                {
+                    long longest = reader.GetInt64(0);
+                    TxtLongestSession.Text = FormatDuration(longest);
+                }
+            } catch { }
+
             TxtTotalTime.Text = FormatDuration(totalSeconds);
             TxtTotalGames.Text = activeGames.ToString();
 
@@ -63,7 +80,15 @@ namespace GameTimeTracker.Views
             {
                 new Axis
                 {
-                    Labels = labels
+                    Labels = labels,
+                    LabelsPaint = new LiveChartsCore.SkiaSharpView.Painting.SolidColorPaint(SkiaSharp.SKColors.LightGray)
+                }
+            };
+            ActivityChart.YAxes = new[]
+            {
+                new Axis
+                {
+                    LabelsPaint = new LiveChartsCore.SkiaSharpView.Painting.SolidColorPaint(SkiaSharp.SKColors.LightGray)
                 }
             };
         }
