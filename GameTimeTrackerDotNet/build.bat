@@ -7,7 +7,10 @@ echo Сборка релизной версии GameTimeTracker (C# / .NET 8)
 echo ========================================================
 echo.
 
-dotnet publish GameTimeTracker/GameTimeTracker.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "%~dp0Release"
+:: Переходим в папку с .csproj, так как dotnet publish работает надежнее с файлом проекта
+cd GameTimeTracker
+
+dotnet publish GameTimeTracker.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "..\Release"
 
 echo.
 echo ========================================================
